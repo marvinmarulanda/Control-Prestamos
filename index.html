@@ -1,0 +1,1540 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="Préstamos"/>
+  <meta name="theme-color" content="#2563eb"/>
+  <title>Gestor de Préstamos</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+    body{
+      background:#f4f6fb;
+      font-family:system-ui,-apple-system,sans-serif;
+      overscroll-behavior:none;
+      /* safe area para iOS notch */
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      padding-left: env(safe-area-inset-left, 0px);
+      padding-right: env(safe-area-inset-right, 0px);
+    }
+    /* Quitar el padding del body para que el header llegue hasta arriba del todo */
+    body { padding-top: 0; }
+    select,input,textarea,button{font-family:inherit;}
+    #root{max-width:440px;margin:0 auto;}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script type="text/babel">
+const { useState, useEffect } = React;
+const fmt = (n) => "$ " + Math.round(n || 0).toLocaleString("es-CO");
+const fmtD = (d) => { if (!d) return ""; const [y, m, day] = d.split("-"); return `${day}/${m}/${y}`; };
+const fmtLong = (d) => { if (!d) return ""; return new Date(d + "T12:00:00").toLocaleDateString("es-CO", { day: "numeric", month: "long", year: "numeric" }); };
+const todayStr = () => new Date().toISOString().split("T")[0];
+const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36).slice(-4);
+const diffDays = (d) => { const t = new Date(); t.setHours(12,0,0,0); return Math.round((new Date(d+"T12:00:00")-t)/86400000); };
+const greet = () => { const h=new Date().getHours(); return h<12?"Buenos días":h<19?"Buenas tardes":"Buenas noches"; };
+const getSt = (due, paid) => paid?"pagada":due<todayStr()?"vencida":"pendiente";
+const monthName = (m) => ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"][m];
+
+// Convención de labels = igual que el Excel:
+//   sin sufijo = semanal  |  Q = quincenal  |  M = mensual
+const MODS = [
+  // ── $ 1.000.000 ─────────────────────────────────────────────────────────
+  {id:"1000x12", label:"1000 x 12S",  monto:1000000, cuota:120000,  pagos:12, tipo:"semanal",   ganancia:440000,  semanal:36667},
+  {id:"1000x6Q", label:"1000 x 6Q", monto:1000000, cuota:235000,  pagos:6,  tipo:"quincenal", ganancia:410000,  semanal:34167},
+  {id:"1000x3M", label:"1000 x 3M", monto:1000000, cuota:475000,  pagos:3,  tipo:"mensual",   ganancia:425000,  semanal:35417},
+  {id:"1000x16", label:"1000 x 16S",  monto:1000000, cuota:95000,   pagos:16, tipo:"semanal",   ganancia:520000,  semanal:43333},
+  {id:"1000x8Q", label:"1000 x 8Q", monto:1000000, cuota:190000,  pagos:8,  tipo:"quincenal", ganancia:520000,  semanal:43333},
+  {id:"1000x4M", label:"1000 x 4M", monto:1000000, cuota:380000,  pagos:4,  tipo:"mensual",   ganancia:520000,  semanal:43333},
+  // ── $ 1.200.000 ─────────────────────────────────────────────────────────
+  {id:"1200x12", label:"1200 x 12S",  monto:1200000, cuota:135000,  pagos:12, tipo:"semanal",   ganancia:420000,  semanal:35000},
+  {id:"1200x6Q", label:"1200 x 6Q", monto:1200000, cuota:270000,  pagos:6,  tipo:"quincenal", ganancia:420000,  semanal:35000},
+  {id:"1200x3M", label:"1200 x 3M", monto:1200000, cuota:550000,  pagos:3,  tipo:"mensual",   ganancia:450000,  semanal:37500},
+  {id:"1200x16", label:"1200 x 16S",  monto:1200000, cuota:105000,  pagos:16, tipo:"semanal",   ganancia:480000,  semanal:40000},
+  {id:"1200x8Q", label:"1200 x 8Q", monto:1200000, cuota:215000,  pagos:8,  tipo:"quincenal", ganancia:520000,  semanal:43333},
+  {id:"1200x4M", label:"1200 x 4M", monto:1200000, cuota:435000,  pagos:4,  tipo:"mensual",   ganancia:540000,  semanal:45000},
+  // ── $ 1.500.000 ─────────────────────────────────────────────────────────
+  {id:"1500x12", label:"1500 x 12S",  monto:1500000, cuota:170000,  pagos:12, tipo:"semanal",   ganancia:540000,  semanal:45000},
+  {id:"1500x6Q", label:"1500 x 6Q", monto:1500000, cuota:335000,  pagos:6,  tipo:"quincenal", ganancia:510000,  semanal:42500},
+  {id:"1500x3M", label:"1500 x 3M", monto:1500000, cuota:680000,  pagos:3,  tipo:"mensual",   ganancia:540000,  semanal:45000},
+  {id:"1500x16", label:"1500 x 16S",  monto:1500000, cuota:130000,  pagos:16, tipo:"semanal",   ganancia:580000,  semanal:48333},
+  {id:"1500x8Q", label:"1500 x 8Q", monto:1500000, cuota:260000,  pagos:8,  tipo:"quincenal", ganancia:580000,  semanal:48333},
+  {id:"1500x4M", label:"1500 x 4M", monto:1500000, cuota:525000,  pagos:4,  tipo:"mensual",   ganancia:600000,  semanal:50000},
+  // ── $ 2.000.000 ─────────────────────────────────────────────────────────
+  {id:"2000x12", label:"2000 x 12S",  monto:2000000, cuota:225000,  pagos:12, tipo:"semanal",   ganancia:700000,  semanal:58333},
+  {id:"2000x6Q", label:"2000 x 6Q", monto:2000000, cuota:445000,  pagos:6,  tipo:"quincenal", ganancia:670000,  semanal:55833},
+  {id:"2000x3M", label:"2000 x 3M", monto:2000000, cuota:905000,  pagos:3,  tipo:"mensual",   ganancia:715000,  semanal:59583},
+  {id:"2000x16", label:"2000 x 16S",  monto:2000000, cuota:170000,  pagos:16, tipo:"semanal",   ganancia:720000,  semanal:60000},
+  {id:"2000x8Q", label:"2000 x 8Q", monto:2000000, cuota:345000,  pagos:8,  tipo:"quincenal", ganancia:760000,  semanal:63333},
+  {id:"2000x4M", label:"2000 x 4M", monto:2000000, cuota:700000,  pagos:4,  tipo:"mensual",   ganancia:800000,  semanal:66667},
+  // ── $ 2.500.000 ─────────────────────────────────────────────────────────
+  {id:"2500x12", label:"2500 x 12S",  monto:2500000, cuota:275000,  pagos:12, tipo:"semanal",   ganancia:800000,  semanal:66667},
+  {id:"2500x6Q", label:"2500 x 6Q", monto:2500000, cuota:550000,  pagos:6,  tipo:"quincenal", ganancia:800000,  semanal:66667},
+  {id:"2500x3M", label:"2500 x 3M", monto:2500000, cuota:1110000, pagos:3,  tipo:"mensual",   ganancia:830000,  semanal:69167},
+  {id:"2500x16", label:"2500 x 16S",  monto:2500000, cuota:210000,  pagos:16, tipo:"semanal",   ganancia:860000,  semanal:71667},
+  {id:"2500x8Q", label:"2500 x 8Q", monto:2500000, cuota:420000,  pagos:8,  tipo:"quincenal", ganancia:860000,  semanal:71667},
+  {id:"2500x4M", label:"2500 x 4M", monto:2500000, cuota:875000,  pagos:4,  tipo:"mensual",   ganancia:900000,  semanal:75000},
+  // ── $ 3.000.000 ─────────────────────────────────────────────────────────
+  {id:"3000x12", label:"3000 x 12S",  monto:3000000, cuota:330000,  pagos:12, tipo:"semanal",   ganancia:960000,  semanal:80000},
+  {id:"3000x6Q", label:"3000 x 6Q", monto:3000000, cuota:660000,  pagos:6,  tipo:"quincenal", ganancia:960000,  semanal:80000},
+  {id:"3000x3M", label:"3000 x 3M", monto:3000000, cuota:1330000, pagos:3,  tipo:"mensual",   ganancia:990000,  semanal:82500},
+  {id:"3000x16", label:"3000 x 16S",  monto:3000000, cuota:250000,  pagos:16, tipo:"semanal",   ganancia:1000000, semanal:83333},
+  {id:"3000x8Q", label:"3000 x 8Q", monto:3000000, cuota:505000,  pagos:8,  tipo:"quincenal", ganancia:1040000, semanal:86667},
+  {id:"3000x4M", label:"3000 x 4M", monto:3000000, cuota:1020000, pagos:4,  tipo:"mensual",   ganancia:1080000, semanal:90000},
+  // ── $ 4.000.000 ─────────────────────────────────────────────────────────
+  {id:"4000x12", label:"4000 x 12S",  monto:4000000, cuota:445000,  pagos:12, tipo:"semanal",   ganancia:1340000, semanal:111667},
+  {id:"4000x6Q", label:"4000 x 6Q", monto:4000000, cuota:890000,  pagos:6,  tipo:"quincenal", ganancia:1340000, semanal:111667},
+  {id:"4000x3M", label:"4000 x 3M", monto:4000000, cuota:1815000, pagos:3,  tipo:"mensual",   ganancia:1445000, semanal:120417},
+  {id:"4000x16", label:"4000 x 16S",  monto:4000000, cuota:335000,  pagos:16, tipo:"semanal",   ganancia:1360000, semanal:113333},
+  {id:"4000x8Q", label:"4000 x 8Q", monto:4000000, cuota:670000,  pagos:8,  tipo:"quincenal", ganancia:1360000, semanal:113333},
+  {id:"4000x4M", label:"4000 x 4M", monto:4000000, cuota:1360000, pagos:4,  tipo:"mensual",   ganancia:1440000, semanal:120000},
+  // ── $ 5.000.000 ─────────────────────────────────────────────────────────
+  {id:"5000x12", label:"5000 x 12S",  monto:5000000, cuota:555000,  pagos:12, tipo:"semanal",   ganancia:1660000, semanal:138333},
+  {id:"5000x6Q", label:"5000 x 6Q", monto:5000000, cuota:1110000, pagos:6,  tipo:"quincenal", ganancia:1660000, semanal:138333},
+  {id:"5000x3M", label:"5000 x 3M", monto:5000000, cuota:2270000, pagos:3,  tipo:"mensual",   ganancia:1810000, semanal:150833},
+  {id:"5000x16", label:"5000 x 16S",  monto:5000000, cuota:425000,  pagos:16, tipo:"semanal",   ganancia:1800000, semanal:150000},
+  {id:"5000x8Q", label:"5000 x 8Q", monto:5000000, cuota:850000,  pagos:8,  tipo:"quincenal", ganancia:1800000, semanal:150000},
+  {id:"5000x4M", label:"5000 x 4M", monto:5000000, cuota:1700000, pagos:4,  tipo:"mensual",   ganancia:1800000, semanal:150000},
+  {id:"5000x20", label:"5000 x 20S",  monto:5000000, cuota:350000,  pagos:20, tipo:"semanal",   ganancia:2000000, semanal:166667},
+  {id:"5000x10Q",label:"5000 x 10Q",monto:5000000, cuota:700000,  pagos:10, tipo:"quincenal", ganancia:2000000, semanal:166667},
+  {id:"5000x5M", label:"5000 x 5M", monto:5000000, cuota:1400000, pagos:5,  tipo:"mensual",   ganancia:2000000, semanal:166667},
+  // ── $ 10.000.000 ────────────────────────────────────────────────────────
+  {id:"10000x12", label:"10000 x 12S",  monto:10000000, cuota:1110000, pagos:12, tipo:"semanal",   ganancia:3320000, semanal:276667},
+  {id:"10000x6Q", label:"10000 x 6Q", monto:10000000, cuota:2220000, pagos:6,  tipo:"quincenal", ganancia:3320000, semanal:276667},
+  {id:"10000x3M", label:"10000 x 3M", monto:10000000, cuota:4535000, pagos:3,  tipo:"mensual",   ganancia:3605000, semanal:300417},
+  {id:"10000x16", label:"10000 x 16S",  monto:10000000, cuota:850000,  pagos:16, tipo:"semanal",   ganancia:3600000, semanal:300000},
+  {id:"10000x8Q", label:"10000 x 8Q", monto:10000000, cuota:1700000, pagos:8,  tipo:"quincenal", ganancia:3600000, semanal:300000},
+  {id:"10000x4M", label:"10000 x 4M", monto:10000000, cuota:3400000, pagos:4,  tipo:"mensual",   ganancia:3600000, semanal:300000},
+  {id:"10000x20", label:"10000 x 20S",  monto:10000000, cuota:700000,  pagos:20, tipo:"semanal",   ganancia:4000000, semanal:333333},
+  {id:"10000x10Q",label:"10000 x 10Q",monto:10000000, cuota:1400000, pagos:10, tipo:"quincenal", ganancia:4000000, semanal:333333},
+  {id:"10000x5M", label:"10000 x 5M", monto:10000000, cuota:2800000, pagos:5,  tipo:"mensual",   ganancia:4000000, semanal:333333},
+];
+
+// Montos únicos para agrupar dropdowns por monto
+const MONTOS_UNICOS = [...new Set(MODS.map(m => m.monto))];
+// Retorna las modalidades de un monto dado
+const modsDeMontos = (monto) => MODS.filter(m => m.monto === monto);
+
+const mkInst=(dates,pagadas)=>dates.map((d,i)=>({id:String(i+1),num:i+1,dueDate:d,paid:i<pagadas}));
+
+const INIT_CLIENTS=[
+  {id:"c1",name:"Dayana",phone:"",createdAt:"2025-11-18"},
+  {id:"c2",name:"Olga",phone:"",createdAt:"2025-12-17"},
+  {id:"c3",name:"Diego",phone:"",createdAt:"2026-01-09"},
+  {id:"c4",name:"Diego/Daniela",phone:"",createdAt:"2026-01-15"},
+  {id:"c5",name:"Marta",phone:"",createdAt:"2026-01-15"},
+  {id:"c6",name:"Yurley Torres",phone:"",createdAt:"2026-01-15"},
+  {id:"c7",name:"Tio Gerardo",phone:"",createdAt:"2026-02-05"},
+  {id:"c8",name:"Camilo/Dayana",phone:"",createdAt:"2026-02-11"},
+  {id:"c9",name:"Juan Camilo",phone:"",createdAt:"2026-02-15"},
+  {id:"c10",name:"Daniel",phone:"",createdAt:"2026-02-15"},
+  {id:"c11",name:"Andres Perez",phone:"",createdAt:"2026-02-15"},
+  {id:"c12",name:"Daniela",phone:"",createdAt:"2026-02-15"},
+  {id:"c13",name:"Shirley hermana",phone:"",createdAt:"2026-02-20"},
+  {id:"c14",name:"Carlos",phone:"",createdAt:"2026-03-05"},
+  {id:"c15",name:"Shirley",phone:"",createdAt:"2026-03-05"},
+  {id:"c16",name:"Jorge Eventos",phone:"",createdAt:"2026-03-10"},
+  {id:"c17",name:"Sergio",phone:"",createdAt:"2026-03-15"},
+  {id:"c18",name:"Cuñada Maryury",phone:"",createdAt:"2026-03-15"},
+  {id:"c19",name:"Kimberly",phone:"",createdAt:"2026-03-15"},
+];
+
+const INIT_LOANS=[
+  {id:"l1",clientId:"c1",startDate:"2025-11-18",monto:1500000,cuota:240000,ganancia:420000,semanal:26250,pagos:8,tipo:"quincenal",installments:mkInst(["2025-12-15","2025-12-31","2026-01-15","2026-01-31","2026-02-15","2026-02-28","2026-03-15","2026-03-31"],7)},
+  {id:"l2",clientId:"c2",startDate:"2025-12-17",monto:1500000,cuota:247000,ganancia:476000,semanal:29750,pagos:8,tipo:"quincenal",installments:mkInst(["2025-12-31","2026-01-15","2026-01-31","2026-02-15","2026-02-28","2026-03-15","2026-03-31","2026-04-15"],6)},
+  {id:"l3",clientId:"c3",startDate:"2026-01-09",monto:3000000,cuota:655000,ganancia:930000,semanal:77500,pagos:6,tipo:"quincenal",installments:mkInst(["2026-01-25","2026-02-10","2026-02-25","2026-03-10","2026-03-25","2026-04-10"],4)},
+  {id:"l4",clientId:"c4",startDate:"2026-01-15",monto:2500000,cuota:270000,ganancia:740000,semanal:61667,pagos:12,tipo:"semanal",installments:mkInst(["2026-01-23","2026-01-30","2026-02-06","2026-02-13","2026-02-20","2026-02-27","2026-03-06","2026-03-13","2026-03-20","2026-03-27","2026-04-03","2026-04-10"],8)},
+  {id:"l5",clientId:"c5",startDate:"2026-01-15",monto:2500000,cuota:550000,ganancia:800000,semanal:66667,pagos:6,tipo:"quincenal",installments:mkInst(["2026-01-31","2026-02-15","2026-02-28","2026-03-15","2026-03-31","2026-04-15"],4)},
+  {id:"l6",clientId:"c6",startDate:"2026-01-15",monto:1200000,cuota:270000,ganancia:420000,semanal:35000,pagos:6,tipo:"quincenal",installments:mkInst(["2026-01-31","2026-02-15","2026-02-28","2026-03-15","2026-03-31","2026-04-15"],4)},
+  {id:"l7",clientId:"c7",startDate:"2026-02-05",monto:800000,cuota:180000,ganancia:280000,semanal:23333,pagos:6,tipo:"quincenal",installments:mkInst(["2026-02-28","2026-03-15","2026-03-31","2026-04-15","2026-04-30","2026-05-15"],2)},
+  {id:"l8",clientId:"c8",startDate:"2026-02-11",monto:1000000,cuota:175000,ganancia:400000,semanal:25000,pagos:8,tipo:"quincenal",installments:mkInst(["2026-02-28","2026-03-15","2026-03-31","2026-04-15","2026-04-30","2026-05-15","2026-05-31","2026-06-15"],2)},
+  {id:"l9",clientId:"c9",startDate:"2026-02-15",monto:2000000,cuota:440000,ganancia:640000,semanal:53333,pagos:6,tipo:"quincenal",installments:mkInst(["2026-02-28","2026-03-15","2026-03-31","2026-04-15","2026-04-30","2026-05-15"],2)},
+  {id:"l10",clientId:"c10",startDate:"2026-02-15",monto:1200000,cuota:270000,ganancia:420000,semanal:35000,pagos:6,tipo:"quincenal",installments:mkInst(["2026-02-28","2026-03-15","2026-03-31","2026-04-15","2026-04-30","2026-05-15"],2)},
+  {id:"l11",clientId:"c11",startDate:"2026-02-15",monto:1000000,cuota:235000,ganancia:410000,semanal:34167,pagos:6,tipo:"quincenal",installments:mkInst(["2026-02-28","2026-03-15","2026-03-31","2026-04-15","2026-04-30","2026-05-15"],2)},
+  {id:"l12",clientId:"c12",startDate:"2026-02-15",monto:5000000,cuota:1620000,ganancia:1480000,semanal:185000,pagos:4,tipo:"mensual",installments:mkInst(["2026-03-15","2026-04-15","2026-05-15","2026-06-15"],1)},
+  {id:"l13",clientId:"c13",startDate:"2026-02-20",monto:800000,cuota:190000,ganancia:340000,semanal:28333,pagos:6,tipo:"quincenal",installments:mkInst(["2026-03-15","2026-03-31","2026-04-15","2026-04-30","2026-05-15","2026-05-31"],1)},
+  {id:"l14",clientId:"c14",startDate:"2026-03-05",monto:4000000,cuota:1320000,ganancia:1280000,semanal:160000,pagos:4,tipo:"mensual",installments:mkInst(["2026-04-10","2026-05-10","2026-06-10","2026-07-10"],0)},
+  {id:"l15",clientId:"c15",startDate:"2026-03-05",monto:1200000,cuota:270000,ganancia:420000,semanal:35000,pagos:6,tipo:"quincenal",installments:mkInst(["2026-03-15","2026-03-31","2026-04-15","2026-04-30","2026-05-15","2026-05-31"],1)},
+  {id:"l16",clientId:"c16",startDate:"2026-03-10",monto:2000000,cuota:225000,ganancia:700000,semanal:58333,pagos:12,tipo:"semanal",installments:mkInst(["2026-03-10","2026-03-17","2026-03-24","2026-03-31","2026-04-07","2026-04-14","2026-04-21","2026-04-28","2026-05-05","2026-05-12","2026-05-19","2026-05-26"],2)},
+  {id:"l17",clientId:"c15",startDate:"2026-03-15",monto:1200000,cuota:270000,ganancia:420000,semanal:35000,pagos:6,tipo:"quincenal",installments:mkInst(["2026-03-31","2026-04-15","2026-04-30","2026-05-15","2026-05-31","2026-06-15"],0)},
+  {id:"l18",clientId:"c17",startDate:"2026-03-15",monto:1200000,cuota:270000,ganancia:420000,semanal:35000,pagos:6,tipo:"quincenal",installments:mkInst(["2026-03-31","2026-04-15","2026-04-30","2026-05-15","2026-05-31","2026-06-15"],0)},
+  {id:"l19",clientId:"c18",startDate:"2026-03-15",monto:2000000,cuota:445000,ganancia:670000,semanal:55833,pagos:6,tipo:"quincenal",installments:mkInst(["2026-03-31","2026-04-15","2026-04-30","2026-05-15","2026-05-31","2026-06-15"],0)},
+  {id:"l20",clientId:"c19",startDate:"2026-03-15",monto:3000000,cuota:660000,ganancia:960000,semanal:80000,pagos:6,tipo:"quincenal",installments:mkInst(["2026-03-31","2026-04-15","2026-04-30","2026-05-15","2026-05-31","2026-06-15"],0)},
+];
+
+const KEY="prestamos_app"; // ← key permanente, nunca cambia
+const save=async(d)=>{
+  try{
+    // guardar en storage de Claude Y en localStorage como backup
+    try{await window.storage.set(KEY,JSON.stringify(d));}catch(e){}
+    try{localStorage.setItem(KEY,JSON.stringify(d));}catch(e){}
+  }catch(e){}
+};
+const load=async()=>{
+  try{
+    // 1. Intentar window.storage (Claude)
+    try{
+      const r=await window.storage.get(KEY);
+      if(r&&r.value) return JSON.parse(r.value);
+    }catch(e){}
+    // 2. Intentar localStorage (Netlify/navegador)
+    const r=localStorage.getItem(KEY);
+    if(r) return JSON.parse(r);
+    // 3. Migrar desde keys viejos
+    for(const old of ["prestamos_v6","prestamos_v5","prestamos_v4","prestamos_v3","prestamos_v2"]){
+      try{
+        const or=await window.storage.get(old);
+        if(or&&or.value){const d=JSON.parse(or.value);save(d);return d;}
+      }catch(e){}
+      try{
+        const or=localStorage.getItem(old);
+        if(or){const d=JSON.parse(or);save(d);return d;}
+      }catch(e){}
+    }
+    return null;
+  }catch{return null;}
+};
+
+const S={
+  card:{background:"#fff",borderRadius:14,padding:"14px 16px",marginBottom:10,boxShadow:"0 1px 4px rgba(0,0,0,0.08)"},
+  lbl:{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:4,marginTop:10},
+  inp:{width:"100%",padding:"10px 12px",borderRadius:8,border:"1.5px solid #d1d5db",fontSize:14,outline:"none",boxSizing:"border-box"},
+  btnP:{width:"100%",padding:13,background:"#2563eb",color:"#fff",border:"none",borderRadius:10,fontWeight:700,fontSize:15,cursor:"pointer",marginTop:10},
+  btnS:{width:"100%",padding:12,background:"#fff",color:"#2563eb",border:"2px solid #2563eb",borderRadius:10,fontWeight:700,fontSize:15,cursor:"pointer",marginTop:8},
+};
+
+function genDates(start,pagos,tipo){
+  const dates=[];const d=new Date(start+"T12:00:00");
+  for(let i=0;i<pagos;i++){
+    if(tipo==="semanal")d.setDate(d.getDate()+7);
+    else if(tipo==="quincenal")d.setDate(d.getDate()+15);
+    else d.setMonth(d.getMonth()+1);
+    dates.push(d.toISOString().split("T")[0]);
+  }
+  return dates;
+}
+
+function Modal({title,onClose,children}){
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:999,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style={{background:"#f4f6fb",borderRadius:"20px 20px 0 0",padding:20,width:"100%",maxWidth:440,maxHeight:"90vh",overflowY:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <h2 style={{margin:0,fontSize:17,fontWeight:700}}>{title}</h2>
+          <button onClick={onClose} style={{border:"none",background:"#e5e7eb",borderRadius:"50%",width:30,height:30,cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Badge({status}){
+  const c=status==="pagada"?"#dcfce7,#16a34a":status==="vencida"?"#fee2e2,#dc2626":"#fef3c7,#d97706";
+  const [bg,cl]=c.split(",");
+  const label=status==="pagada"?"Pagada":status==="vencida"?"Vencida":"Pendiente";
+  return <span style={{background:bg,color:cl,padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:700}}>{label}</span>;
+}
+
+function LoanCard({loan,clientName,onSelect,onDelete}){
+  const paid=loan.installments.filter(i=>i.paid).length;
+  const pct=Math.round(paid/loan.pagos*100);
+  const isActive=loan.installments.some(i=>!i.paid);
+  const next=loan.installments.find(i=>!i.paid);
+  const d=next?diffDays(next.dueDate):null;
+  return(
+    <div style={{...S.card,cursor:"pointer"}} onClick={onSelect}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+        <div>
+          {clientName&&<div style={{fontWeight:700,fontSize:15}}>{clientName}</div>}
+          <div style={{fontWeight:800,color:"#1d4ed8",fontSize:17}}>{fmt(loan.monto)}</div>
+          <div style={{fontSize:12,color:"#6b7280"}}>{loan.pagos} cuotas {loan.tipo} · {fmt(loan.cuota)}/cuota</div>
+        </div>
+        <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+          <div style={{display:"inline-block",background:isActive?"#dcfce7":"#e5e7eb",color:isActive?"#16a34a":"#6b7280",padding:"3px 8px",borderRadius:20,fontSize:11,fontWeight:700}}>{isActive?"Activo":"Listo"}</div>
+          {d!==null&&<div style={{marginTop:4,background:d<0?"#fee2e2":d<=3?"#fef3c7":"#eff6ff",color:d<0?"#dc2626":d<=3?"#d97706":"#2563eb",padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:700,textAlign:"center"}}>{d<0?`Venc. ${-d}d`:d===0?"Hoy":`En ${d}d`}</div>}
+        </div>
+      </div>
+      <div style={{height:6,background:"#e5e7eb",borderRadius:3,marginBottom:4}}>
+        <div style={{height:"100%",background:"#2563eb",borderRadius:3,width:`${pct}%`,transition:"width 0.3s"}}></div>
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7280",marginBottom:6}}>
+        <span>{paid}/{loan.pagos} cuotas · {pct}%</span>
+        <span>Gan. sem: <b style={{color:"#16a34a"}}>{fmt(loan.semanal)}</b></span>
+      </div>
+      {onDelete&&<div style={{display:"flex",justifyContent:"flex-end"}}><button onClick={e=>{e.stopPropagation();onDelete();}} style={{color:"#dc2626",background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:600}}>🗑 Eliminar</button></div>}
+    </div>
+  );
+}
+
+function App(){
+  const [clients,setClients]=useState([]);
+  const [loans,setLoans]=useState([]);
+  const [caja,setCaja]=useState(2884000);
+  const [tab,setTab]=useState("home");
+  const [detail,setDetail]=useState(null);
+  const [modal,setModal]=useState(null);
+  const [editId,setEditId]=useState(null);
+  const [search,setSearch]=useState("");
+  const [calFilter,setCalFilter]=useState("todos");
+  const [calView,setCalView]=useState("mes");
+  const [calDate,setCalDate]=useState({year:new Date().getFullYear(),month:new Date().getMonth()});
+  const [fCli,setFCli]=useState({name:"",phone:""});
+  const [fLoan,setFLoan]=useState({clientId:"",modId:"",startDate:todayStr(),nota:"",esManual:false,manualMonto:"",manualCuota:"",manualPagos:"",manualTipo:"quincenal"});
+  const [cajaInp,setCajaInp]=useState("");
+  const [loaded,setLoaded]=useState(false);
+  const [toast,setToast]=useState(null);
+  const [confirm,setConfirm]=useState(null); // {msg, onOk}
+  const [showCompleted,setShowCompleted]=useState(false);
+  // ── Billetera / Finanzas ──
+  const BILLETERA_DEFAULT = {
+    grupos:[
+      {id:"g1",nombre:"Marvin",tipo:"marvin",items:[
+        {id:"i1",concepto:"Extraído Marvin",monto:16706000},
+        {id:"i2",concepto:"Celulares Mío",monto:5310000}
+      ]},
+      {id:"g2",nombre:"Paola",tipo:"paola",items:[
+        {id:"i3",concepto:"Extraído Paola",monto:9520000},
+        {id:"i4",concepto:"Celular Muñeca",monto:7500000},
+        {id:"i5",concepto:"Préstamo a Mamá",monto:10841000}
+      ]},
+      {id:"g3",nombre:"Gastos",tipo:"compartido",items:[
+        {id:"i6",concepto:"Construcción Cabaña",monto:32638000},
+        {id:"i7",concepto:"Chantilly",monto:6500000},
+        {id:"i8",concepto:"Baloto",monto:162000}
+      ]}
+    ],
+    gananciaHistorica:119715000,
+    gananciaApp:0,
+    invertido:6800000
+  };
+  const [billetera,setBilletera]=useState(null);
+
+  useEffect(()=>{
+    load().then(d=>{
+      if(d){
+        setClients(d.clients||[]);
+        setLoans(d.loans||[]);
+        setCaja(d.caja??2884000);
+        const b = d.billetera ?? BILLETERA_DEFAULT;
+        // migrate old data: add tipo to grupos if missing, remove socios
+        if(b.grupos && b.grupos.length>=3){
+          if(!b.grupos[0].tipo) b.grupos[0].tipo="marvin";
+          if(!b.grupos[1].tipo) b.grupos[1].tipo="paola";
+          for(let i=2;i<b.grupos.length;i++) if(!b.grupos[i].tipo) b.grupos[i].tipo="compartido";
+        }
+        if(b.socios) delete b.socios;
+        setBilletera(b);
+      }
+      else{setClients(INIT_CLIENTS);setLoans(INIT_LOANS);setBilletera(BILLETERA_DEFAULT);}
+      setLoaded(true);
+    });
+  },[]);
+
+  useEffect(()=>{if(loaded&&billetera)save({clients,loans,caja,billetera});},[clients,loans,caja,billetera,loaded]);
+
+  const toast2=(msg)=>{setToast(msg);setTimeout(()=>setToast(null),2500);};
+
+  const activeLoans=loans.filter(l=>l.installments.some(i=>!i.paid));
+  const completedLoans=loans.filter(l=>l.installments.every(i=>i.paid));
+  const totalCap=activeLoans.reduce((s,l)=>s+l.monto,0);
+  const totalPaid=loans.reduce((s,l)=>s+l.installments.filter(i=>i.paid).length*l.cuota,0);
+  const totalPend=activeLoans.reduce((s,l)=>s+l.installments.filter(i=>!i.paid).length*l.cuota,0);
+  const totalSem=activeLoans.reduce((s,l)=>s+(l.semanal||0),0);
+  const pct=totalPaid+totalPend>0?Math.round(totalPaid/(totalPaid+totalPend)*100):0;
+
+  const allInst=loans.flatMap(l=>{
+    const cli=clients.find(c=>c.id===l.clientId);
+    return l.installments.map(i=>({...i,loanId:l.id,clientName:cli?.name||"?",cuota:l.cuota,pagos:l.pagos,status:getSt(i.dueDate,i.paid)}));
+  });
+  const next7=allInst.filter(i=>!i.paid&&diffDays(i.dueDate)>=0&&diffDays(i.dueDate)<=7);
+  const overdueList=allInst.filter(i=>i.status==="vencida");
+
+  const addClient=()=>{
+    if(!fCli.name.trim())return;
+    setClients(p=>[...p,{id:uid(),name:fCli.name.trim(),phone:fCli.phone.trim(),createdAt:todayStr()}]);
+    setFCli({name:"",phone:""});setModal(null);toast2("Cliente creado ✓");
+  };
+  const updateClient=()=>{
+    if(!fCli.name.trim())return;
+    setClients(p=>p.map(c=>c.id===editId?{...c,name:fCli.name.trim(),phone:fCli.phone.trim()}:c));
+    setModal(null);toast2("Cliente actualizado ✓");
+  };
+  const deleteClient=(id)=>{
+    setConfirm({msg:"¿Eliminar este cliente y todos sus préstamos?",onOk:()=>{
+      setClients(p=>p.filter(c=>c.id!==id));setLoans(p=>p.filter(l=>l.clientId!==id));
+      if(detail?.id===id)setDetail(null);toast2("Cliente eliminado");
+    }});
+  };
+  const addLoan=()=>{
+    if(!fLoan.clientId)return;
+    if(activeLoans.length>=30){toast2("Límite de 30 préstamos alcanzado");return;}
+    if(activeLoans.length>=30)return;
+    let monto,cuota,pagos,tipo,ganancia,semanal;
+    if(fLoan.esManual){
+      monto=Number(fLoan.manualMonto);cuota=Number(fLoan.manualCuota);
+      pagos=Number(fLoan.manualPagos);tipo=fLoan.manualTipo;
+      if(!monto||!cuota||!pagos){toast2("Completá monto, cuota y número de pagos");return;}
+      ganancia=(cuota*pagos)-monto;
+      semanal=tipo==="semanal"?ganancia/pagos:tipo==="quincenal"?ganancia/(pagos*2):ganancia/(pagos*4);
+    } else {
+      if(!fLoan.modId)return;
+      const mod=MODS.find(m=>m.id===fLoan.modId);if(!mod)return;
+      ({monto,cuota,pagos,tipo,ganancia,semanal}=mod);
+    }
+    const dates=genDates(fLoan.startDate,pagos,tipo);
+    setLoans(p=>[...p,{id:uid(),clientId:fLoan.clientId,startDate:fLoan.startDate,monto,cuota,ganancia,semanal,pagos,tipo,nota:fLoan.nota,installments:dates.map((d,i)=>({id:String(i+1),num:i+1,dueDate:d,paid:false}))}]);
+    setCaja(prev=>prev-monto);
+    setFLoan({clientId:"",modId:"",startDate:todayStr(),nota:"",esManual:false,manualMonto:"",manualCuota:"",manualPagos:"",manualTipo:"quincenal"});
+    setModal(null);
+    toast2("💸 -"+Math.round(monto).toLocaleString("es-CO")+" prestado · Préstamo creado ✓");
+  };
+  const deleteLoan=(id)=>{
+    const loan=loans.find(l=>l.id===id);
+    setConfirm({msg:"¿Eliminar este préstamo?",onOk:()=>{
+      if(loan){
+        // Reversar el efecto neto sobre caja:
+        // Se restó el monto cuando se creó, se sumó cada cuota pagada.
+        // Net = -monto + (pagas * cuota). Para revertir: +monto - (pagas * cuota)
+        const pagas = loan.installments.filter(i=>i.paid).length;
+        const devolver = loan.monto - pagas * loan.cuota;
+        setCaja(prev => prev + devolver);
+      }
+      setLoans(p=>p.filter(l=>l.id!==id));
+      if(detail?.id===id)setDetail(null);
+      toast2("Préstamo eliminado · caja ajustada");
+    }});
+  };
+  // helpers billetera
+  const updBilletera=(fn)=>setBilletera(prev=>{
+    const b=JSON.parse(JSON.stringify(prev)); // deep clone
+    return fn(b);
+  });
+
+  const toggleInst=(loanId,instId)=>{
+    const loan=loans.find(l=>l.id===loanId);
+    if(!loan)return;
+    const inst=loan.installments.find(i=>i.id===instId);
+    if(!inst)return;
+    const marcandoPagada=!inst.paid;
+    // Actualizar caja
+    setCaja(prev=>marcandoPagada ? prev+loan.cuota : prev-loan.cuota);
+    // Actualizar cuotas
+    const nuevasInst = loan.installments.map(i=>i.id!==instId?i:{...i,paid:marcandoPagada});
+    setLoans(p=>p.map(l=>l.id!==loanId?l:{...l,installments:nuevasInst}));
+    // Detectar si el préstamo quedó completado
+    const ahoraCompleto = marcandoPagada && nuevasInst.every(i=>i.paid);
+    const eraCompleto   = !marcandoPagada && loan.installments.filter(i=>i.id!==instId).every(i=>i.paid);
+    if(ahoraCompleto){
+      updBilletera(b=>{b.gananciaApp=(b.gananciaApp||0)+loan.ganancia;return b;});
+      toast2('🎉 ¡Préstamo completado! +'+Math.round(loan.ganancia).toLocaleString('es-CO')+' de ganancia');
+    } else if(eraCompleto){
+      // Se deshizo el último pago → restar ganancia
+      updBilletera(b=>{b.gananciaApp=(b.gananciaApp||0)-loan.ganancia;return b;});
+      toast2('↩ Ganancia revertida -'+Math.round(loan.ganancia).toLocaleString('es-CO'));
+    } else {
+      toast2(marcandoPagada ? '💵 +'+Math.round(loan.cuota).toLocaleString('es-CO')+' ingresó a caja' : '💵 -'+Math.round(loan.cuota).toLocaleString('es-CO')+' revertido de caja');
+    }
+  };
+
+  if(!loaded)return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#f0f4ff"}}><div style={{textAlign:"center"}}><div style={{fontSize:52}}>💰</div><p style={{color:"#2563eb",fontWeight:700,fontSize:16}}>Cargando datos...</p></div></div>;
+
+  // ─── LOAN DETAIL ────────────────────────────────────────────────────────────
+  if(detail?.type==="loan"){
+    const loan=loans.find(l=>l.id===detail.id);
+    if(!loan)return null;
+    const cli=clients.find(c=>c.id===loan.clientId);
+    const paid2=loan.installments.filter(i=>i.paid).length;
+    const pct2=Math.round(paid2/loan.pagos*100);
+    const cobrado=loan.cuota*paid2;
+    const pendiente=loan.cuota*(loan.pagos-paid2);
+    return(
+      <div style={{maxWidth:440,margin:"0 auto",minHeight:"100vh",background:"#f4f6fb",fontFamily:"system-ui,sans-serif"}}>
+        <div style={{background:"#2563eb",paddingTop:"calc(env(safe-area-inset-top, 0px) + 14px)",paddingBottom:"14px",paddingLeft:"16px",paddingRight:"16px",display:"flex",alignItems:"center",gap:12,position:"sticky",top:0,zIndex:100}}>
+          <button onClick={()=>setDetail(null)} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",borderRadius:8,padding:"4px 10px",cursor:"pointer",fontWeight:700,fontSize:14}}>← Volver</button>
+          <h2 style={{color:"#fff",margin:0,fontSize:16,fontWeight:700}}>{cli?.name}</h2>
+        </div>
+        <div style={{padding:"12px 14px",paddingBottom:"calc(env(safe-area-inset-bottom, 0px) + 30px)"}}>
+          <div style={S.card}>
+            <div style={{fontWeight:700,fontSize:18,marginBottom:4}}>{cli?.name||"?"}</div>
+            {cli?.phone&&<div style={{color:"#6b7280"}}>📞 {cli.phone}</div>}
+          </div>
+          <div style={S.card}>
+            <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>Información del Préstamo</h3>
+            {[["Monto Original",fmt(loan.monto),"#1d4ed8"],["Modalidad",`${loan.pagos} cuotas ${loan.tipo}`,"#374151"],["Cuota por pago",fmt(loan.cuota),"#374151"],["Ganancia total",fmt(loan.ganancia),"#16a34a"],["🗓 Ganancia semanal",fmt(loan.semanal),"#16a34a"],["Fecha inicio",fmtLong(loan.startDate),"#6b7280"]].map(([lb,v,cl])=>(
+              <div key={lb} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f3f4f6",fontSize:14}}>
+                <span style={{color:"#6b7280"}}>{lb}</span><span style={{fontWeight:700,color:cl}}>{v}</span>
+              </div>
+            ))}
+          </div>
+          <div style={S.card}>
+            <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>Progreso</h3>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
+              {[["Capital",fmt(loan.monto),"#1d4ed8"],["Cobrado",fmt(cobrado),"#16a34a"],["Pendiente",fmt(pendiente),"#dc2626"]].map(([lb,v,cl])=>(
+                <div key={lb} style={{textAlign:"center",background:"#f9fafb",borderRadius:8,padding:8}}>
+                  <div style={{fontWeight:800,color:cl,fontSize:13}}>{v}</div>
+                  <div style={{fontSize:10,color:"#6b7280"}}>{lb}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{height:8,background:"#e5e7eb",borderRadius:4,marginBottom:6}}>
+              <div style={{height:"100%",background:"#2563eb",borderRadius:4,width:`${pct2}%`,transition:"width 0.3s"}}></div>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7280"}}>
+              <span>{pct2}% completado</span>
+              <div style={{display:"flex",gap:8}}>
+                <span style={{background:"#dcfce7",color:"#16a34a",padding:"2px 8px",borderRadius:20,fontWeight:700}}>{paid2} pagadas</span>
+                <span style={{background:"#fef3c7",color:"#d97706",padding:"2px 8px",borderRadius:20,fontWeight:700}}>{loan.pagos-paid2} pendientes</span>
+              </div>
+            </div>
+          </div>
+          <div style={S.card}>
+            <h3 style={{margin:"0 0 12px",fontSize:15,fontWeight:700}}>Cronograma de Cuotas</h3>
+            {loan.installments.map(inst=>{
+              const st=getSt(inst.dueDate,inst.paid);
+              const dLeft=diffDays(inst.dueDate);
+              return(
+                <div key={inst.id} style={{padding:"12px 0",borderBottom:"1px solid #f3f4f6"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:14}}>Cuota #{inst.num} · {fmt(loan.cuota)}</div>
+                      <div style={{fontSize:12,color:"#6b7280"}}>Vence: {fmtLong(inst.dueDate)}</div>
+                      {!inst.paid&&<div style={{fontSize:11,color:dLeft<0?"#dc2626":dLeft===0?"#d97706":"#6b7280",fontWeight:600,marginTop:2}}>{dLeft<0?`Vencida hace ${-dLeft} día${-dLeft!==1?"s":""}`:dLeft===0?"¡Vence hoy!":`En ${dLeft} días`}</div>}
+                    </div>
+                    <Badge status={st}/>
+                  </div>
+                  {!inst.paid?(
+                    <button onClick={()=>toggleInst(loan.id,inst.id)} style={{background:"#16a34a",color:"#fff",border:"none",borderRadius:8,padding:"9px",fontSize:13,fontWeight:700,cursor:"pointer",width:"100%"}}>💳 Marcar como Pagada</button>
+                  ):(
+                    <button onClick={()=>toggleInst(loan.id,inst.id)} style={{background:"#f3f4f6",color:"#6b7280",border:"none",borderRadius:8,padding:"8px",fontSize:12,fontWeight:600,cursor:"pointer",width:"100%"}}>↩ Deshacer pago</button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <button onClick={()=>deleteLoan(loan.id)} style={{...S.btnS,borderColor:"#dc2626",color:"#dc2626",marginBottom:20}}>🗑 Eliminar Préstamo</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── CLIENT DETAIL ──────────────────────────────────────────────────────────
+  if(detail?.type==="client"){
+    const cli=clients.find(c=>c.id===detail.id);
+    if(!cli)return null;
+    const cLoans=loans.filter(l=>l.clientId===cli.id);
+    const tP=cLoans.reduce((s,l)=>s+l.monto,0);
+    const tCob=cLoans.reduce((s,l)=>s+l.installments.filter(i=>i.paid).length*l.cuota,0);
+    const tPend=cLoans.reduce((s,l)=>s+l.installments.filter(i=>!i.paid).length*l.cuota,0);
+    const actC=cLoans.filter(l=>l.installments.some(i=>!i.paid));
+    return(
+      <div style={{maxWidth:440,margin:"0 auto",minHeight:"100vh",background:"#f4f6fb",fontFamily:"system-ui,sans-serif"}}>
+        <div style={{background:"#2563eb",paddingTop:"calc(env(safe-area-inset-top, 0px) + 14px)",paddingBottom:"14px",paddingLeft:"16px",paddingRight:"16px",display:"flex",alignItems:"center",gap:12,position:"sticky",top:0,zIndex:100}}>
+          <button onClick={()=>setDetail(null)} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",borderRadius:8,padding:"4px 10px",cursor:"pointer",fontWeight:700,fontSize:14}}>← Volver</button>
+          <h2 style={{color:"#fff",margin:0,fontSize:16,fontWeight:700}}>{cli.name}</h2>
+        </div>
+        <div style={{padding:"12px 14px",paddingBottom:"calc(env(safe-area-inset-bottom, 0px) + 30px)"}}>
+          <div style={S.card}>
+            <div style={{fontWeight:700,fontSize:18,marginBottom:4}}>{cli.name}</div>
+            {cli.phone&&<div style={{color:"#6b7280",fontSize:14}}>📞 {cli.phone}</div>}
+            <div style={{color:"#9ca3af",fontSize:12,marginTop:2}}>Cliente desde: {fmtD(cli.createdAt)}</div>
+            <div style={{display:"flex",gap:8,marginTop:12}}>
+              <button onClick={()=>{setEditId(cli.id);setFCli({name:cli.name,phone:cli.phone||""});setModal("edit-client");}} style={{flex:1,padding:"9px",background:"#eff6ff",border:"none",borderRadius:8,color:"#2563eb",fontWeight:700,cursor:"pointer"}}>✏️ Editar</button>
+              <button onClick={()=>deleteClient(cli.id)} style={{flex:1,padding:"9px",background:"#fee2e2",border:"none",borderRadius:8,color:"#dc2626",fontWeight:700,cursor:"pointer"}}>🗑 Eliminar</button>
+            </div>
+          </div>
+          <div style={S.card}>
+            <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>Resumen Financiero</h3>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {[["Capital Prestado","#1d4ed8",tP],["Total Cobrado","#16a34a",tCob],["Pendiente","#dc2626",tPend],["Préstamos activos","#374151",actC.length]].map(([lb,cl,v])=>(
+                <div key={lb} style={{background:"#f9fafb",borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{fontWeight:800,color:cl,fontSize:typeof v==="number"&&v>999999?12:15}}>{lb==="Préstamos activos"?v:fmt(v)}</div>
+                  <div style={{fontSize:11,color:"#6b7280"}}>{lb}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <h3 style={{margin:0,fontSize:15,fontWeight:700}}>Préstamos ({cLoans.length})</h3>
+            <button onClick={()=>{setFLoan({clientId:cli.id,modId:"",startDate:todayStr(),nota:""});setModal("new-loan");}} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Nuevo</button>
+          </div>
+          {cLoans.map(l=><LoanCard key={l.id} loan={l} onSelect={()=>setDetail({type:"loan",id:l.id})} />)}
+        </div>
+        {modal==="edit-client"&&<Modal title="Editar Cliente" onClose={()=>setModal(null)}>
+          <label style={S.lbl}>Nombre completo *</label>
+          <input style={S.inp} value={fCli.name} onChange={e=>setFCli(p=>({...p,name:e.target.value}))}/>
+          <label style={S.lbl}>Teléfono</label>
+          <input style={S.inp} value={fCli.phone} onChange={e=>setFCli(p=>({...p,phone:e.target.value}))}/>
+          <button style={S.btnP} onClick={updateClient}>Guardar Cambios</button>
+          <button style={S.btnS} onClick={()=>setModal(null)}>Cancelar</button>
+        </Modal>}
+        {modal==="new-loan"&&<LoanModal fLoan={fLoan} setFLoan={setFLoan} clients={clients} onAdd={addLoan} onClose={()=>setModal(null)}/>}
+      </div>
+    );
+  }
+
+  // ─── MAIN LAYOUT ────────────────────────────────────────────────────────────
+  const NavTab=({t,ic,lb})=>(
+    <button onClick={()=>{setTab(t);setSearch("");}} style={{flex:1,padding:"8px 2px",border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+      <span style={{fontSize:20}}>{ic}</span>
+      <span style={{fontSize:10,fontWeight:700,color:tab===t?"#2563eb":"#6b7280"}}>{lb}</span>
+    </button>
+  );
+
+  return(
+    <div style={{maxWidth:440,margin:"0 auto",minHeight:"100vh",background:"#f4f6fb",fontFamily:"system-ui,sans-serif",position:"relative"}}>
+      {toast&&<div style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",background:"#1d4ed8",color:"#fff",padding:"10px 22px",borderRadius:20,zIndex:9999,fontWeight:700,fontSize:14,boxShadow:"0 4px 14px rgba(0,0,0,0.25)"}}>{toast}</div>}
+
+      <div style={{background:"#2563eb",padding:"env(safe-area-inset-top, 14px) 20px 12px",paddingTop:"calc(env(safe-area-inset-top, 0px) + 14px)",position:"sticky",top:0,zIndex:100}}>
+        <h1 style={{color:"#fff",fontWeight:700,fontSize:18,margin:0,textAlign:"center"}}>
+          {tab==="home"?"Inicio":tab==="clients"?"Clientes":tab==="loans"?"Préstamos":tab==="calendar"?"Calendario":"Reportes"}
+        </h1>
+      </div>
+
+      <div style={{paddingBottom:"calc(env(safe-area-inset-bottom, 0px) + 80px)"}}>
+        {tab==="home"&&(
+          <div style={{padding:"12px 14px"}}>
+            {/* Greeting */}
+            <div style={{...S.card,background:"linear-gradient(135deg,#2563eb,#1d4ed8)",marginBottom:10}}>
+              <div style={{color:"#fff"}}>
+                <div style={{fontWeight:700,fontSize:19,marginBottom:2}}>{greet()} 👋</div>
+                <div style={{fontSize:13,opacity:0.8}}>Gestor de Préstamos Personales</div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginTop:14}}>
+                {[[clients.length,"👥","Clientes"],[activeLoans.length,"💰","Activos"],[pct+"%","📈","Recuperado"]].map(([v,ic,lb])=>(
+                  <div key={lb} style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"10px 6px",textAlign:"center"}}>
+                    <div style={{fontSize:16}}>{ic}</div>
+                    <div style={{color:"#fff",fontWeight:800,fontSize:18}}>{v}</div>
+                    <div style={{color:"rgba(255,255,255,0.75)",fontSize:10}}>{lb}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Caja */}
+            <CajaCard caja={caja} setCaja={setCaja} toast2={toast2} />
+
+            {/* ─── BILLETERA ─────────────────────────────────────── */}
+            {billetera && <BilleteraCard
+              billetera={billetera}
+              updBilletera={updBilletera}
+              caja={caja}
+              setCaja={setCaja}
+              activeLoans={activeLoans}
+              toast2={toast2}
+            />}
+
+            {/* ─── CALCULADORA RÁPIDA ─────────────────────────────────── */}
+            <CalcRapida />
+
+            {/* Financial summary */}
+            <div style={S.card}>
+              <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>💰 Resumen Financiero</h3>
+              {[["📦","#1d4ed8",totalCap,"Capital Prestado"],["✅","#16a34a",totalPaid,"Total Cobrado"],["⏳","#d97706",totalPend,"Por Cobrar"],["🔥","#7c3aed",totalSem,"Ganancia Semanal"]].map(([ic,cl,v,lb])=>(
+                <div key={lb} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #f3f4f6"}}>
+                  <div style={{width:36,height:36,borderRadius:"50%",background:cl+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{ic}</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:800,color:cl,fontSize:16}}>{fmt(v)}</div>
+                    <div style={{fontSize:11,color:"#6b7280"}}>{lb}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Alerts */}
+            {(overdueList.length>0||next7.length>0)&&(
+              <div style={S.card}>
+                <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>🔔 Alertas Importantes</h3>
+                {overdueList.length>0&&<div style={{background:"#fee2e2",borderRadius:8,padding:"10px 12px",marginBottom:8}}><div style={{color:"#dc2626",fontWeight:700,fontSize:13}}>⚠️ {overdueList.length} cuota{overdueList.length!==1?"s":""} vencida{overdueList.length!==1?"s":""}</div><div style={{color:"#dc2626",fontSize:12}}>Revisá el calendario para ver los detalles</div></div>}
+                {next7.length>0&&<div style={{background:"#fef3c7",borderRadius:8,padding:"10px 12px"}}><div style={{color:"#d97706",fontWeight:700,fontSize:13}}>📅 {next7.length} cuota{next7.length!==1?"s":""} en los próximos 7 días</div></div>}
+              </div>
+            )}
+
+            {/* Next 7 days */}
+            {next7.length>0&&(
+              <div style={S.card}>
+                <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>📋 Próximas Cuotas</h3>
+                {next7.sort((a,b)=>a.dueDate.localeCompare(b.dueDate)).map(i=>(
+                  <div key={i.loanId+i.id} style={{padding:"8px 0",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:14}}>{i.clientName}</div>
+                      <div style={{fontSize:12,color:"#6b7280"}}>{fmt(i.cuota)} · {fmtD(i.dueDate)}</div>
+                    </div>
+                    <span style={{background:"#eff6ff",color:"#2563eb",padding:"4px 10px",borderRadius:20,fontSize:12,fontWeight:700}}>{diffDays(i.dueDate)===0?"Hoy":`${diffDays(i.dueDate)}d`}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Quick actions */}
+            <div style={S.card}>
+              <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>⚡ Acciones Rápidas</h3>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                {[["🧑","Nuevo Cliente","#16a34a",()=>{setFCli({name:"",phone:""});setModal("new-client");}],["💰","Nuevo Préstamo","#2563eb",()=>{setFLoan({clientId:"",modId:"",startDate:todayStr(),nota:"",esManual:false,manualMonto:"",manualCuota:"",manualPagos:"",manualTipo:"quincenal"});setModal("new-loan");}],["📅","Calendario","#d97706",()=>setTab("calendar")],["📊","Reportes","#7c3aed",()=>setTab("reports")]].map(([ic,lb,cl,fn])=>(
+                  <button key={lb} onClick={fn} style={{padding:"16px 8px",background:"#fff",border:`2px solid ${cl}`,borderRadius:12,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
+                    <span style={{fontSize:28}}>{ic}</span>
+                    <span style={{fontSize:12,fontWeight:700,color:cl}}>{lb}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab==="clients"&&(
+          <div style={{padding:"12px 14px"}}>
+            <div style={{...S.card,background:"#eff6ff",border:"1px solid #bfdbfe"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontWeight:700,fontSize:15}}>👥 Clientes <span style={{color:"#2563eb"}}>{clients.length}/30</span></div>
+              </div>
+              <div style={{height:6,background:"#dbeafe",borderRadius:3,marginTop:8}}><div style={{height:"100%",background:"#2563eb",borderRadius:3,width:`${clients.length/30*100}%`}}></div></div>
+            </div>
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              <input style={{...S.inp,flex:1}} placeholder="Buscar clientes..." value={search} onChange={e=>setSearch(e.target.value)}/>
+              <button onClick={()=>{setFCli({name:"",phone:""});setModal("new-client");}} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:8,padding:"0 14px",fontWeight:700,cursor:"pointer",fontSize:13,whiteSpace:"nowrap"}}>+ Nuevo</button>
+            </div>
+            {clients.filter(c=>c.name.toLowerCase().includes(search.toLowerCase())).map(c=>{
+              const cl2=loans.filter(l=>l.clientId===c.id);
+              const act2=cl2.filter(l=>l.installments.some(i=>!i.paid)).length;
+              const tot2=cl2.reduce((s,l)=>s+l.monto,0);
+              return(
+                <div key={c.id} style={{...S.card,cursor:"pointer"}} onClick={()=>setDetail({type:"client",id:c.id})}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:16}}>{c.name}</div>
+                      {c.phone&&<div style={{fontSize:13,color:"#6b7280"}}>📞 {c.phone}</div>}
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontWeight:700,color:"#1d4ed8",fontSize:15}}>{fmt(tot2)}</div>
+                      <span style={{background:"#eff6ff",color:"#2563eb",padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:700}}>{act2} préstamo{act2!==1?"s":""}</span>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10,paddingTop:8,borderTop:"1px solid #f3f4f6"}}>
+                    <div style={{fontSize:11,color:"#9ca3af"}}>Desde {fmtD(c.createdAt)}</div>
+                    <button onClick={e=>{e.stopPropagation();deleteClient(c.id);}} style={{color:"#dc2626",background:"none",border:"none",cursor:"pointer",fontSize:12,fontWeight:600}}>🗑 Eliminar</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {tab==="loans"&&(
+          <div style={{padding:"12px 14px"}}>
+            <div style={{...S.card,background:"#eff6ff",border:"1px solid #bfdbfe"}}>
+              <div style={{fontWeight:700,fontSize:15}}>💰 Préstamos <span style={{color:"#2563eb"}}>{activeLoans.length+completedLoans.length}/30</span></div>
+              <div style={{height:6,background:"#dbeafe",borderRadius:3,marginTop:8}}><div style={{height:"100%",background:"#2563eb",borderRadius:3,width:`${Math.min((activeLoans.length+completedLoans.length)/30,1)*100}%`}}></div></div>
+            </div>
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              <input style={{...S.inp,flex:1}} placeholder="Buscar por cliente..." value={search} onChange={e=>setSearch(e.target.value)}/>
+              <button onClick={()=>{setFLoan({clientId:"",modId:"",startDate:todayStr(),nota:"",esManual:false,manualMonto:"",manualCuota:"",manualPagos:"",manualTipo:"quincenal"});setModal("new-loan");}} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:8,padding:"0 14px",fontWeight:700,cursor:"pointer",fontSize:13,whiteSpace:"nowrap"}}>+ Nuevo</button>
+            </div>
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              {[["Activos",false],[`Completados`,true]].map(([lb,v])=>(
+                <button key={lb} onClick={()=>setShowCompleted(v)} style={{flex:1,padding:"8px",borderRadius:20,border:"none",fontWeight:700,fontSize:13,cursor:"pointer",background:showCompleted===v?"#2563eb":"#e5e7eb",color:showCompleted===v?"#fff":"#374151"}}>{lb} ({v?completedLoans.length:activeLoans.length})</button>
+              ))}
+            </div>
+            {(showCompleted?completedLoans:activeLoans).filter(l=>{const c=clients.find(cl=>cl.id===l.clientId);return(c?.name||"").toLowerCase().includes(search.toLowerCase());}).map(l=>(
+              <LoanCard key={l.id} loan={l} clientName={clients.find(c=>c.id===l.clientId)?.name} onSelect={()=>setDetail({type:"loan",id:l.id})} onDelete={()=>deleteLoan(l.id)}/>
+            ))}
+          </div>
+        )}
+
+        {tab==="calendar"&&<CalView allInst={allInst} calFilter={calFilter} setCalFilter={setCalFilter} calView={calView} setCalView={setCalView} calDate={calDate} setCalDate={setCalDate} onToggle={toggleInst}/>}
+
+        {tab==="reports"&&(
+          <div style={{padding:"12px 14px"}}>
+            <div style={S.card}>
+              <h3 style={{margin:"0 0 12px",fontSize:15,fontWeight:700}}>💰 Resumen Financiero</h3>
+              {[["Capital prestado activo",totalCap,"#1d4ed8"],["Total cobrado",totalPaid,"#16a34a"],["Por cobrar",totalPend,"#dc2626"],["Ganancia semanal total",totalSem,"#7c3aed"],["Ganancia estimada (activos)",activeLoans.reduce((s,l)=>s+l.ganancia,0),"#d97706"]].map(([lb,v,cl])=>(
+                <div key={lb} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #f3f4f6"}}>
+                  <span style={{fontSize:13,color:"#6b7280"}}>{lb}</span>
+                  <span style={{fontWeight:800,color:cl}}>{fmt(v)}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={S.card}>
+              <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>📊 Clientes y Préstamos</h3>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                <div style={{background:"#f9fafb",borderRadius:8,padding:10}}>
+                  <div style={{fontWeight:700,fontSize:13,marginBottom:6}}>Clientes</div>
+                  <div style={{fontSize:12,color:"#6b7280"}}>Total: <b style={{color:"#374151"}}>{clients.length}</b></div>
+                </div>
+                <div style={{background:"#f9fafb",borderRadius:8,padding:10}}>
+                  <div style={{fontWeight:700,fontSize:13,marginBottom:6}}>Préstamos</div>
+                  <div style={{fontSize:12,color:"#16a34a"}}>Activos: <b>{activeLoans.length}</b></div>
+                  <div style={{fontSize:12,color:"#6b7280"}}>Listos: <b>{completedLoans.length}</b></div>
+                </div>
+                <div style={{background:"#f9fafb",borderRadius:8,padding:10}}>
+                  <div style={{fontWeight:700,fontSize:13,marginBottom:6}}>Cuotas</div>
+                  <div style={{fontSize:12,color:"#16a34a"}}>Pagadas: <b>{loans.reduce((s,l)=>s+l.installments.filter(i=>i.paid).length,0)}</b></div>
+                  <div style={{fontSize:12,color:"#d97706"}}>Pend: <b>{loans.reduce((s,l)=>s+l.installments.filter(i=>!i.paid).length,0)}</b></div>
+                </div>
+              </div>
+            </div>
+
+            <div style={S.card}>
+              <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>📈 Ganancia Semanal por Préstamo</h3>
+              <div style={{background:"#eff6ff",borderRadius:8,padding:"10px 14px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontWeight:700,color:"#1d4ed8",fontSize:14}}>TOTAL SEMANAL</span>
+                <span style={{fontWeight:800,color:"#1d4ed8",fontSize:18}}>{fmt(totalSem)}</span>
+              </div>
+              {[...activeLoans].sort((a,b)=>b.semanal-a.semanal).map((l,i)=>{
+                const c=clients.find(cl=>cl.id===l.clientId);
+                return(
+                  <div key={l.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f3f4f6"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{width:22,height:22,borderRadius:"50%",background:"#eff6ff",color:"#2563eb",fontSize:11,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{i+1}</div>
+                      <div>
+                        <div style={{fontWeight:700,fontSize:13}}>{c?.name||"?"}</div>
+                        <div style={{fontSize:11,color:"#6b7280"}}>{fmt(l.monto)} · {l.pagos} cuotas {l.tipo}</div>
+                      </div>
+                    </div>
+                    <span style={{fontWeight:800,color:"#16a34a",fontSize:14,flexShrink:0,marginLeft:8}}>{fmt(l.semanal)}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{...S.card,marginBottom:20}}>
+              <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>🏆 Top Clientes por Monto</h3>
+              {clients.map(c=>{const t=loans.filter(l=>l.clientId===c.id).reduce((s,l)=>s+l.monto,0);return{...c,t};}).filter(c=>c.t>0).sort((a,b)=>b.t-a.t).slice(0,8).map((c,i)=>(
+                <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #f3f4f6"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:28,height:28,borderRadius:"50%",background:i<3?"#fbbf24":"#e5e7eb",color:i<3?"#fff":"#374151",fontSize:12,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>#{i+1}</div>
+                    <div style={{fontWeight:700}}>{c.name}</div>
+                  </div>
+                  <div style={{fontWeight:700,color:"#1d4ed8"}}>{fmt(c.t)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:440,background:"#fff",borderTop:"1px solid #e5e7eb",display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom, 0px)"}}>
+        {[["home","🏠","Inicio"],["clients","👥","Clientes"],["loans","💰","Préstamos"],["calendar","📅","Calendario"],["reports","📊","Reportes"]].map(([t,ic,lb])=>(
+          <NavTab key={t} t={t} ic={ic} lb={lb}/>
+        ))}
+      </div>
+
+      {confirm&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:9998,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
+          <div style={{background:'#fff',borderRadius:16,padding:24,width:'100%',maxWidth:340,boxShadow:'0 8px 30px rgba(0,0,0,0.2)'}}>
+            <div style={{fontSize:32,textAlign:'center',marginBottom:12}}>🗑</div>
+            <div style={{fontWeight:700,fontSize:16,textAlign:'center',marginBottom:8,color:'#111'}}>Confirmar eliminación</div>
+            <div style={{fontSize:14,color:'#6b7280',textAlign:'center',marginBottom:20}}>{confirm.msg}</div>
+            <div style={{display:'flex',gap:10}}>
+              <button onClick={()=>setConfirm(null)} style={{flex:1,padding:12,borderRadius:10,border:'2px solid #d1d5db',background:'#fff',fontWeight:700,fontSize:14,cursor:'pointer',color:'#374151'}}>Cancelar</button>
+              <button onClick={()=>{confirm.onOk();setConfirm(null);}} style={{flex:1,padding:12,borderRadius:10,border:'none',background:'#dc2626',fontWeight:700,fontSize:14,cursor:'pointer',color:'#fff'}}>Eliminar</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {modal==="new-client"&&<Modal title="Nuevo Cliente" onClose={()=>setModal(null)}>
+        <label style={S.lbl}>Nombre completo *</label>
+        <input style={S.inp} placeholder="Ej: Juan Pérez" value={fCli.name} onChange={e=>setFCli(p=>({...p,name:e.target.value}))}/>
+        <label style={S.lbl}>Teléfono</label>
+        <input style={S.inp} placeholder="Ej: 300 123 4567" value={fCli.phone} onChange={e=>setFCli(p=>({...p,phone:e.target.value}))}/>
+        <button style={S.btnP} onClick={addClient}>Crear Cliente</button>
+        <button style={S.btnS} onClick={()=>setModal(null)}>Cancelar</button>
+      </Modal>}
+
+      {modal==="new-loan"&&<LoanModal fLoan={fLoan} setFLoan={setFLoan} clients={clients} onAdd={addLoan} onClose={()=>setModal(null)}/>}
+
+
+    </div>
+  );
+}
+
+function LoanModal({fLoan,setFLoan,clients,onAdd,onClose}){
+  const mod=MODS.find(m=>m.id===fLoan.modId);
+  const manualGanancia=fLoan.manualMonto&&fLoan.manualCuota&&fLoan.manualPagos
+    ?(Number(fLoan.manualCuota)*Number(fLoan.manualPagos))-Number(fLoan.manualMonto):null;
+  return(
+    <Modal title="Nuevo Préstamo" onClose={onClose}>
+      <label style={S.lbl}>Cliente *</label>
+      <select style={S.inp} value={fLoan.clientId} onChange={e=>setFLoan(p=>({...p,clientId:e.target.value}))}>
+        <option value="">Seleccioná un cliente...</option>
+        {clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+
+      {/* Toggle modalidad / manual */}
+      <div style={{display:"flex",gap:8,marginTop:12,marginBottom:2}}>
+        {[["📋 Modalidad del listado",false],["✏️ Préstamo especial",true]].map(([lb,v])=>(
+          <button key={String(v)} onClick={()=>setFLoan(p=>({...p,esManual:v,modId:""}))}
+            style={{flex:1,padding:"9px 4px",borderRadius:8,border:`2px solid ${fLoan.esManual===v?"#2563eb":"#e5e7eb"}`,
+              background:fLoan.esManual===v?"#eff6ff":"#fff",
+              color:fLoan.esManual===v?"#2563eb":"#6b7280",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+            {lb}
+          </button>
+        ))}
+      </div>
+
+      {!fLoan.esManual ? (
+        <>
+          <label style={S.lbl}>Modalidad *</label>
+          <select style={S.inp} value={fLoan.modId} onChange={e=>setFLoan(p=>({...p,modId:e.target.value}))}>
+            <option value="">Seleccioná modalidad...</option>
+            {MONTOS_UNICOS.map(monto=>(
+              <optgroup key={monto} label={`── $ ${(monto/1000).toLocaleString("es-CO")}.000 ──`}>
+                {modsDeMontos(monto).map(m=><option key={m.id} value={m.id}>{m.label}</option>)}
+              </optgroup>
+            ))}
+          </select>
+          {mod&&(
+            <div style={{background:"#eff6ff",borderRadius:10,padding:"12px 14px",marginTop:8,border:"1px solid #bfdbfe"}}>
+              <div style={{fontWeight:700,fontSize:13,color:"#1d4ed8",marginBottom:8}}>Vista previa</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                {[["Monto",fmt(mod.monto),"#374151"],["Cuota ("+mod.tipo+")",fmt(mod.cuota),"#1d4ed8"],["Ganancia total",fmt(mod.ganancia),"#16a34a"],["Gan. semanal",fmt(mod.semanal),"#16a34a"]].map(([lb,v,cl])=>(
+                  <div key={lb}><div style={{fontSize:10,color:"#6b7280"}}>{lb}</div><div style={{fontWeight:800,color:cl,fontSize:13}}>{v}</div></div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:"10px 12px",marginTop:4,fontSize:12,color:"#c2410c"}}>
+            Ingresá los valores manualmente para este préstamo especial
+          </div>
+          <label style={S.lbl}>Monto prestado *</label>
+          <input type="number" style={S.inp} placeholder="Ej: 800000" value={fLoan.manualMonto}
+            onChange={e=>setFLoan(p=>({...p,manualMonto:e.target.value}))}/>
+          <label style={S.lbl}>Cuota por pago *</label>
+          <input type="number" style={S.inp} placeholder="Ej: 150000" value={fLoan.manualCuota}
+            onChange={e=>setFLoan(p=>({...p,manualCuota:e.target.value}))}/>
+          <label style={S.lbl}>Número de cuotas *</label>
+          <input type="number" style={S.inp} placeholder="Ej: 6" value={fLoan.manualPagos}
+            onChange={e=>setFLoan(p=>({...p,manualPagos:e.target.value}))}/>
+          <label style={S.lbl}>Tipo de cuota *</label>
+          <select style={S.inp} value={fLoan.manualTipo} onChange={e=>setFLoan(p=>({...p,manualTipo:e.target.value}))}>
+            <option value="semanal">Semanal (cada 7 días)</option>
+            <option value="quincenal">Quincenal (cada 15 días)</option>
+            <option value="mensual">Mensual (cada mes)</option>
+          </select>
+          {manualGanancia!==null&&(
+            <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:"12px 14px",marginTop:8}}>
+              <div style={{fontWeight:700,fontSize:13,color:"#16a34a",marginBottom:8}}>Vista previa</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                {[["Total a cobrar",fmt(Number(fLoan.manualCuota)*Number(fLoan.manualPagos)),"#374151"],
+                  ["Ganancia estimada",fmt(manualGanancia),"#16a34a"]].map(([lb,v,cl])=>(
+                  <div key={lb}><div style={{fontSize:10,color:"#6b7280"}}>{lb}</div><div style={{fontWeight:800,color:cl,fontSize:13}}>{v}</div></div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      <label style={S.lbl}>Fecha del préstamo *</label>
+      <input type="date" style={S.inp} value={fLoan.startDate} onChange={e=>setFLoan(p=>({...p,startDate:e.target.value}))}/>
+      <label style={S.lbl}>Notas adicionales</label>
+      <textarea style={{...S.inp,height:60,resize:"none"}} placeholder="Info adicional..." value={fLoan.nota} onChange={e=>setFLoan(p=>({...p,nota:e.target.value}))}/>
+      <button style={S.btnP} onClick={onAdd}>Crear Préstamo</button>
+      <button style={S.btnS} onClick={onClose}>Cancelar</button>
+    </Modal>
+  );
+}
+
+function CalView({allInst,calFilter,setCalFilter,calView,setCalView,calDate,setCalDate,onToggle}){
+  const filtered=allInst.filter(i=>calFilter==="todos"?true:i.status===calFilter);
+  const monthInsts=filtered.filter(i=>{const[y,m]=i.dueDate.split("-");return parseInt(y)===calDate.year&&parseInt(m)-1===calDate.month;});
+  const week7=filtered.filter(i=>{const d=diffDays(i.dueDate);return d>=0&&d<=7;});
+  const showList=calView==="mes"?monthInsts:week7;
+  const totalCobrar=showList.filter(i=>!i.paid).reduce((s,i)=>s+i.cuota,0);
+
+  const firstDay=new Date(calDate.year,calDate.month,1).getDay();
+  const daysInMonth=new Date(calDate.year,calDate.month+1,0).getDate();
+  const cells=[];
+  for(let i=0;i<firstDay;i++)cells.push(null);
+  for(let d=1;d<=daysInMonth;d++)cells.push(d);
+  const byDay={};
+  monthInsts.forEach(i=>{const d=parseInt(i.dueDate.split("-")[2]);if(!byDay[d])byDay[d]=[];byDay[d].push(i);});
+
+  return(
+    <div style={{padding:"12px 14px"}}>
+      <div style={S.card}>
+        <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>Resumen del Período</h3>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:10}}>
+          {[[allInst.length,"Total","#374151"],[allInst.filter(i=>i.status==="vencida").length,"Vencidas","#dc2626"],[allInst.filter(i=>i.status==="pendiente").length,"Pendientes","#d97706"],[allInst.filter(i=>i.status==="pagada").length,"Pagadas","#16a34a"]].map(([v,lb,cl])=>(
+            <div key={lb} style={{textAlign:"center"}}>
+              <div style={{fontWeight:800,color:cl,fontSize:18}}>{v}</div>
+              <div style={{fontSize:10,color:"#6b7280"}}>{lb}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",background:"#f9fafb",borderRadius:8,padding:"8px 12px"}}>
+          <span style={{fontSize:13,color:"#6b7280"}}>Por cobrar ({calView==="mes"?"mes":"7d"})</span>
+          <span style={{fontWeight:800,color:"#1d4ed8"}}>{fmt(totalCobrar)}</span>
+        </div>
+      </div>
+
+      <div style={S.card}>
+        <div style={{display:"flex",gap:8,marginBottom:10}}>
+          {[["mes","📅 Mes"],["7dias","⏰ Próximos 7d"]].map(([v,lb])=>(
+            <button key={v} onClick={()=>setCalView(v)} style={{flex:1,padding:"8px",borderRadius:20,border:"none",fontWeight:700,fontSize:13,cursor:"pointer",background:calView===v?"#2563eb":"#e5e7eb",color:calView===v?"#fff":"#374151"}}>{lb}</button>
+          ))}
+        </div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+          {[["todos","Todos"],["pendiente","Pendientes"],["vencida","Vencidas"],["pagada","Pagadas"]].map(([v,lb])=>(
+            <button key={v} onClick={()=>setCalFilter(v)} style={{padding:"5px 12px",borderRadius:20,border:"none",fontWeight:600,fontSize:12,cursor:"pointer",background:calFilter===v?"#2563eb":"#e5e7eb",color:calFilter===v?"#fff":"#374151"}}>{lb}</button>
+          ))}
+        </div>
+      </div>
+
+      {calView==="mes"&&(
+        <div style={S.card}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <button onClick={()=>{const d=new Date(calDate.year,calDate.month-1,1);setCalDate({year:d.getFullYear(),month:d.getMonth()});}} style={{background:"#e5e7eb",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontWeight:700}}>◀</button>
+            <div style={{fontWeight:700,fontSize:15}}>{monthName(calDate.month)} {calDate.year}</div>
+            <button onClick={()=>{const d=new Date(calDate.year,calDate.month+1,1);setCalDate({year:d.getFullYear(),month:d.getMonth()});}} style={{background:"#e5e7eb",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontWeight:700}}>▶</button>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,marginBottom:6}}>
+            {["D","L","M","M","J","V","S"].map((d,i)=><div key={i} style={{textAlign:"center",fontSize:10,fontWeight:700,color:"#9ca3af",padding:"4px 0"}}>{d}</div>)}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1}}>
+            {cells.map((day,i)=>{
+              if(!day)return<div key={i}/>;
+              const dInst=byDay[day]||[];
+              const hV=dInst.some(i=>i.status==="vencida"),hP=dInst.some(i=>!i.paid&&!hV),hO=dInst.length>0&&dInst.every(i=>i.paid);
+              const isToday=`${calDate.year}-${String(calDate.month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`===todayStr();
+              return(
+                <div key={day} style={{textAlign:"center",padding:"3px 1px",borderRadius:6,border:isToday?"2px solid #2563eb":"2px solid transparent",minHeight:34}}>
+                  <div style={{fontSize:12,fontWeight:isToday?700:400,color:isToday?"#1d4ed8":"#374151"}}>{day}</div>
+                  {dInst.length>0&&<div style={{width:18,height:18,borderRadius:"50%",background:hV?"#dc2626":hP?"#f59e0b":hO?"#16a34a":"#e5e7eb",color:"#fff",fontSize:10,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",margin:"1px auto 0"}}>{dInst.length}</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div style={S.card}>
+        <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>{calView==="mes"?`${monthName(calDate.month)} ${calDate.year}`:"Próximos 7 días"} · {showList.length} cuotas</h3>
+        {showList.length===0&&<div style={{textAlign:"center",color:"#9ca3af",padding:24}}>No hay cuotas para mostrar</div>}
+        {showList.sort((a,b)=>a.dueDate.localeCompare(b.dueDate)).map(inst=>{
+          const d=diffDays(inst.dueDate);
+          return(
+            <div key={inst.loanId+inst.id} style={{padding:"10px 0",borderBottom:"1px solid #f3f4f6"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:14}}>Cuota {inst.num}/{inst.pagos} · {inst.clientName}</div>
+                  <div style={{fontWeight:800,color:"#1d4ed8",fontSize:15}}>{fmt(inst.cuota)}</div>
+                  <div style={{fontSize:12,color:"#6b7280"}}>Vence: {fmtD(inst.dueDate)}{!inst.paid&&<span style={{color:d<0?"#dc2626":d<=3?"#d97706":"#16a34a",marginLeft:6,fontWeight:600}}>{d<0?`hace ${-d}d`:d===0?"hoy":`en ${d}d`}</span>}</div>
+                </div>
+                <Badge status={inst.status}/>
+              </div>
+              {!inst.paid?(
+                <button onClick={()=>onToggle(inst.loanId,inst.id)} style={{background:"#16a34a",color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>💳 Marcar Pagada</button>
+              ):(
+                <button onClick={()=>onToggle(inst.loanId,inst.id)} style={{background:"#f3f4f6",color:"#6b7280",border:"none",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}}>↩ Deshacer</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── BILLETERA CARD ──────────────────────────────────────────────────────────
+function BilleteraCard({ billetera, updBilletera, caja, setCaja, activeLoans, toast2 }) {
+  const [open, setOpen]         = useState(false);
+  const [editItem, setEditItem] = useState(null);   // {grupoId, itemId}
+  const [editVal, setEditVal]   = useState("");
+  const [editConc, setEditConc] = useState("");
+  const [editNota, setEditNota] = useState("");
+  const [newItem, setNewItem]   = useState(null);   // grupoId
+  const [niMonto, setNiMonto]   = useState("");
+  const [niConc, setNiConc]     = useState("");
+  const [niNota, setNiNota]     = useState("");
+  const [newGrupo, setNewGrupo] = useState(false);
+  const [ngNombre, setNgNombre] = useState("");
+  const [ngTipo, setNgTipo]     = useState("compartido");
+
+  const [editInv, setEditInv]   = useState(false);
+  const [invVal, setInvVal]     = useState("");
+
+  const F = (n) => "$ " + Math.round(n||0).toLocaleString("es-CO");
+
+  const gananciaTotal  = (billetera.gananciaHistorica||0) + (billetera.gananciaApp||0);
+  const totalConInv    = gananciaTotal + (billetera.invertido||0);
+
+  // Extraído por tipo de grupo
+  const extraidoMarvin    = billetera.grupos.filter(g=>g.tipo==="marvin").reduce((s,g)=>s+g.items.reduce((ss,i)=>ss+i.monto,0),0);
+  const extraidoPaola     = billetera.grupos.filter(g=>g.tipo==="paola").reduce((s,g)=>s+g.items.reduce((ss,i)=>ss+i.monto,0),0);
+  const extraidoCompartido= billetera.grupos.filter(g=>g.tipo==="compartido").reduce((s,g)=>s+g.items.reduce((ss,i)=>ss+i.monto,0),0);
+  const totalExtraido     = extraidoMarvin + extraidoPaola + extraidoCompartido;
+
+  // Cálculo automático de ganancias por socio
+  const mitad          = gananciaTotal / 2;
+  const gananciaMarvin = mitad - extraidoMarvin - extraidoCompartido / 2;
+  const gananciaPoala  = mitad - extraidoPaola  - extraidoCompartido / 2;
+
+  const totalGeneral   = (billetera.invertido||0) + gananciaMarvin + gananciaPoala;
+  const totalPrestados = activeLoans.reduce((s,l)=>s+l.monto,0);
+
+  // ── helpers ──────────────────────────────────────────────────────────────
+  const saveItem = (grupoId, itemId) => {
+    const monto = Number(editVal);
+    if (!monto && monto !== 0) return;
+    const oldMonto = billetera.grupos.find(g=>g.id===grupoId)?.items.find(i=>i.id===itemId)?.monto||0;
+    const diff = monto - oldMonto;
+    updBilletera(b=>{
+      const g=b.grupos.find(g=>g.id===grupoId);
+      const it=g.items.find(i=>i.id===itemId);
+      it.monto=monto;
+      if(editConc.trim()) it.concepto=editConc.trim();
+      it.nota=editNota.trim();
+      return b;
+    });
+    if(diff!==0) setCaja(prev=>prev-diff); // más extracción = menos caja
+    setEditItem(null);
+    toast2("✏️ Item actualizado");
+  };
+
+  const deleteItem = (grupoId, itemId) => {
+    const monto = billetera.grupos.find(g=>g.id===grupoId)?.items.find(i=>i.id===itemId)?.monto||0;
+    updBilletera(b=>{ const g=b.grupos.find(g=>g.id===grupoId); g.items=g.items.filter(i=>i.id!==itemId); return b; });
+    setCaja(prev=>prev+monto);
+    toast2("🗑 Item eliminado · caja ajustada");
+  };
+
+  const addItem = (grupoId) => {
+    const monto = Number(niMonto);
+    if (!monto || !niConc.trim()) return;
+    updBilletera(b=>{ b.grupos.find(g=>g.id===grupoId).items.push({id:uid(),concepto:niConc.trim(),monto,nota:niNota.trim()}); return b; });
+    setCaja(prev=>prev-monto);
+    setNewItem(null); setNiMonto(""); setNiConc(""); setNiNota("");
+    toast2("💸 Item agregado · caja ajustada");
+  };
+
+  const addGrupo = () => {
+    if(!ngNombre.trim()) return;
+    updBilletera(b=>{ b.grupos.push({id:uid(),nombre:ngNombre.trim(),tipo:ngTipo,items:[]}); return b; });
+    setNewGrupo(false); setNgNombre(""); setNgTipo("compartido");
+  };
+
+  const deleteGrupo = (grupoId) => {
+    const g=billetera.grupos.find(g=>g.id===grupoId);
+    const total=g.items.reduce((s,i)=>s+i.monto,0);
+    updBilletera(b=>{ b.grupos=b.grupos.filter(g=>g.id!==grupoId); return b; });
+    if(total) setCaja(prev=>prev+total);
+    toast2("🗑 Grupo eliminado");
+  };
+
+
+
+  const saveInvertido = () => {
+    const val=Number(invVal);
+    if(!val&&val!==0) return;
+    updBilletera(b=>{ b.invertido=val; return b; });
+    setEditInv(false);
+    toast2("✏️ Invertido actualizado");
+  };
+
+  const COLORS_GRUPO = ["#16a34a","#2563eb","#d97706","#7c3aed","#dc2626"];
+
+  return (
+    <div style={{borderRadius:14,marginBottom:10,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,0.12)"}}>
+
+      {/* ── Header ── */}
+      <div style={{background:"#1e1b4b",padding:"14px 16px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div>
+            <div style={{fontSize:11,color:"rgba(255,255,255,0.55)",fontWeight:700,letterSpacing:1,marginBottom:4}}>💼 BILLETERA</div>
+            <div style={{fontSize:11,color:"rgba(255,255,255,0.55)",marginBottom:2}}>Ganancias totales</div>
+            <div style={{fontSize:24,fontWeight:900,color:"#a5f3fc",lineHeight:1}}>{F(gananciaTotal)}</div>
+            <div style={{marginTop:6,display:"flex",gap:16}}>
+              <div><div style={{fontSize:10,color:"rgba(255,255,255,0.45)"}}>Extraído total</div><div style={{fontWeight:800,color:"#fca5a5",fontSize:13}}>{F(totalExtraido)}</div></div>
+              <div><div style={{fontSize:10,color:"rgba(255,255,255,0.45)"}}>Saldo ganancias</div><div style={{fontWeight:800,color:"#6ee7b7",fontSize:13}}>{F(gananciaTotal-totalExtraido)}</div></div>
+            </div>
+          </div>
+          <button onClick={()=>setOpen(o=>!o)}
+            style={{background:"rgba(165,243,252,0.15)",border:"1px solid rgba(165,243,252,0.3)",
+              color:"#a5f3fc",borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0}}>
+            {open?"Cerrar":"Ver todo"}
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div style={{background:"#f8fafc"}}>
+
+          {/* ══ GRUPOS DE EXTRACCIÓN ══ */}
+          {billetera.grupos.map((grupo, gi) => {
+            const subtotal = grupo.items.reduce((s,i)=>s+i.monto,0);
+            const color = COLORS_GRUPO[gi % COLORS_GRUPO.length];
+            return (
+              <div key={grupo.id}>
+                {/* Items del grupo */}
+                {grupo.items.map(item => {
+                  const isEditing = editItem?.grupoId===grupo.id && editItem?.itemId===item.id;
+                  return (
+                    <div key={item.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                      padding:"9px 16px",borderBottom:"1px solid #f1f5f9",background:"#fff"}}>
+                      {isEditing ? (
+                        <div style={{flex:1,display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                          <input placeholder="Concepto" value={editConc} onChange={e=>setEditConc(e.target.value)}
+                            style={{flex:"1 1 120px",padding:"5px 8px",borderRadius:6,border:"1.5px solid #2563eb",fontSize:12,outline:"none"}}/>
+                          <input type="number" placeholder="Monto" value={editVal} onChange={e=>setEditVal(e.target.value)}
+                            style={{flex:"1 1 90px",padding:"5px 8px",borderRadius:6,border:"1.5px solid #2563eb",fontSize:12,outline:"none"}}/>
+                          <input placeholder="Nota (opcional)" value={editNota} onChange={e=>setEditNota(e.target.value)}
+                            style={{flex:"1 1 100%",padding:"5px 8px",borderRadius:6,border:"1.5px solid #93c5fd",fontSize:12,outline:"none"}}/>
+                          <button onClick={()=>saveItem(grupo.id,item.id)}
+                            style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>✓ Guardar</button>
+                          <button onClick={()=>setEditItem(null)}
+                            style={{background:"#e5e7eb",color:"#374151",border:"none",borderRadius:6,padding:"5px 8px",fontSize:11,cursor:"pointer"}}>✕</button>
+                        </div>
+                      ) : (
+                        <>
+                          <div>
+                            <span style={{fontSize:13,color:"#374151"}}>{item.concepto}</span>
+                            {item.nota&&<div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>📝 {item.nota}</div>}
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                            <span style={{fontWeight:700,color:"#374151",fontSize:13}}>{F(item.monto)}</span>
+                            <button onClick={()=>{setEditItem({grupoId:grupo.id,itemId:item.id});setEditVal(String(item.monto));setEditConc(item.concepto);setEditNota(item.nota||"");}}
+                              style={{background:"#eff6ff",border:"none",borderRadius:5,padding:"3px 7px",fontSize:10,color:"#2563eb",cursor:"pointer",fontWeight:700}}>✏️</button>
+                            <button onClick={()=>deleteItem(grupo.id,item.id)}
+                              style={{background:"#fee2e2",border:"none",borderRadius:5,padding:"3px 7px",fontSize:10,color:"#dc2626",cursor:"pointer",fontWeight:700}}>✕</button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Agregar item */}
+                {newItem===grupo.id ? (
+                  <div style={{display:"flex",gap:6,padding:"8px 16px",background:"#f0f9ff",flexWrap:"wrap"}}>
+                    <input placeholder="Concepto *" value={niConc} onChange={e=>setNiConc(e.target.value)}
+                      style={{flex:"1 1 120px",padding:"6px 8px",borderRadius:6,border:"1.5px solid #0ea5e9",fontSize:12,outline:"none"}}/>
+                    <input type="number" placeholder="Monto *" value={niMonto} onChange={e=>setNiMonto(e.target.value)}
+                      style={{flex:"1 1 90px",padding:"6px 8px",borderRadius:6,border:"1.5px solid #0ea5e9",fontSize:12,outline:"none"}}/>
+                    <input placeholder="📝 Nota (opcional)" value={niNota} onChange={e=>setNiNota(e.target.value)}
+                      style={{flex:"1 1 100%",padding:"6px 8px",borderRadius:6,border:"1.5px solid #7dd3fc",fontSize:12,outline:"none"}}/>
+                    <button onClick={()=>addItem(grupo.id)}
+                      style={{background:"#0ea5e9",color:"#fff",border:"none",borderRadius:6,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Agregar</button>
+                    <button onClick={()=>setNewItem(null)}
+                      style={{background:"#e5e7eb",color:"#374151",border:"none",borderRadius:6,padding:"6px 8px",fontSize:12,cursor:"pointer"}}>✕</button>
+                  </div>
+                ) : null}
+
+                {/* Subtotal del grupo — fila verde como Excel */}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                  padding:"10px 16px",background:color+"18",borderLeft:`4px solid ${color}`}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontWeight:800,color:color,fontSize:13}}>Total {grupo.nombre}</span>
+                    <button onClick={()=>setNewItem(newItem===grupo.id?null:grupo.id)}
+                      style={{background:color+"22",border:`1px solid ${color}44`,borderRadius:5,padding:"2px 7px",fontSize:10,color:color,cursor:"pointer",fontWeight:700}}>+ Item</button>
+                    <button onClick={()=>deleteGrupo(grupo.id)}
+                      style={{background:"#fee2e2",border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,color:"#dc2626",cursor:"pointer"}}>🗑</button>
+                  </div>
+                  <span style={{fontWeight:900,color:color,fontSize:15}}>{F(subtotal)}</span>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Agregar grupo */}
+          {newGrupo ? (
+            <div style={{display:"flex",gap:8,padding:"10px 16px",background:"#fafafa",borderBottom:"1px solid #e5e7eb",flexWrap:"wrap"}}>
+              <input placeholder="Nombre del grupo..." value={ngNombre} onChange={e=>setNgNombre(e.target.value)}
+                style={{flex:"1 1 140px",padding:"7px 10px",borderRadius:6,border:"1.5px solid #7c3aed",fontSize:13,outline:"none"}}/>
+              <select value={ngTipo} onChange={e=>setNgTipo(e.target.value)}
+                style={{flex:"1 1 120px",padding:"7px 10px",borderRadius:6,border:"1.5px solid #7c3aed",fontSize:12,outline:"none",background:"#fff"}}>
+                <option value="compartido">Gastos compartidos</option>
+                <option value="marvin">Solo Marvin</option>
+                <option value="paola">Solo Paola</option>
+              </select>
+              <button onClick={addGrupo}
+                style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:6,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Crear</button>
+              <button onClick={()=>setNewGrupo(false)}
+                style={{background:"#e5e7eb",border:"none",borderRadius:6,padding:"7px 10px",fontSize:12,cursor:"pointer"}}>✕</button>
+            </div>
+          ) : (
+            <button onClick={()=>setNewGrupo(true)}
+              style={{width:"100%",padding:"9px",background:"#f8fafc",border:"none",borderTop:"1px solid #e5e7eb",
+                color:"#7c3aed",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+              + Agregar grupo de extracción
+            </button>
+          )}
+
+          {/* ══ RESUMEN GANANCIAS ══ */}
+          <div style={{background:"#1e1b4b",padding:"12px 16px",marginTop:2}}>
+            <div style={{fontSize:11,color:"rgba(255,255,255,0.5)",fontWeight:700,letterSpacing:1,marginBottom:8}}>RESUMEN GANANCIAS</div>
+            {[
+              ["Ganancias (histórico + app)", gananciaTotal, "#a5f3fc"],
+              ["Total (Ganancias + Invertido)", totalConInv, "#fbbf24"],
+              ["Extraído Total", totalExtraido, "#fca5a5"],
+            ].map(([lb,v,cl])=>(
+              <div key={lb} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+                <span style={{fontSize:12,color:"rgba(255,255,255,0.65)"}}>{lb}</span>
+                <span style={{fontWeight:800,color:cl,fontSize:13}}>{F(v)}</span>
+              </div>
+            ))}
+            {/* Editar ganancia histórica */}
+            <div style={{marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0"}}>
+              <span style={{fontSize:11,color:"rgba(255,255,255,0.45)"}}>· Ganancias pre-app</span>
+              <span style={{fontSize:11,color:"rgba(255,255,255,0.45)"}}>{F(billetera.gananciaHistorica)}</span>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0"}}>
+              <span style={{fontSize:11,color:"rgba(255,255,255,0.45)"}}>· Ganancias desde app</span>
+              <span style={{fontSize:11,color:"rgba(255,255,255,0.45)"}}>{F(billetera.gananciaApp||0)}</span>
+            </div>
+          </div>
+
+          {/* ══ SOCIOS ══ */}
+          <div style={{background:"#fff",padding:"12px 16px",borderTop:"2px solid #e5e7eb"}}>
+            <div style={{fontSize:11,color:"#6b7280",fontWeight:700,letterSpacing:1,marginBottom:8}}>SOCIOS / INVERSIÓN</div>
+
+            {/* Invertido — editable */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f1f5f9"}}>
+              <span style={{fontSize:13,color:"#374151"}}>Invertido</span>
+              {editInv ? (
+                <div style={{display:"flex",gap:6}}>
+                  <input type="number" value={invVal} onChange={e=>setInvVal(e.target.value)}
+                    style={{width:110,padding:"4px 8px",borderRadius:6,border:"1.5px solid #2563eb",fontSize:12,outline:"none",textAlign:"right"}}/>
+                  <button onClick={saveInvertido}
+                    style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}}>✓</button>
+                  <button onClick={()=>setEditInv(false)}
+                    style={{background:"#e5e7eb",border:"none",borderRadius:6,padding:"4px 6px",fontSize:11,cursor:"pointer"}}>✕</button>
+                </div>
+              ) : (
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontWeight:700,fontSize:13}}>{F(billetera.invertido||0)}</span>
+                  <button onClick={()=>{setEditInv(true);setInvVal(String(billetera.invertido||0));}}
+                    style={{background:"#eff6ff",border:"none",borderRadius:5,padding:"3px 7px",fontSize:10,color:"#2563eb",cursor:"pointer",fontWeight:700}}>✏️</button>
+                </div>
+              )}
+            </div>
+
+            {/* ── Fórmula explicada ── */}
+            <div style={{background:"#f0f9ff",borderRadius:8,padding:"8px 12px",margin:"8px 0",fontSize:11,color:"#0369a1",lineHeight:1.5}}>
+              <b>Cálculo automático:</b><br/>
+              Cada socio = (Ganancias ÷ 2) − Su extraído − (Gastos compartidos ÷ 2)
+            </div>
+
+            {/* ── Ganancias calculadas ── */}
+            {[["Ganancias Marvin", gananciaMarvin, "#2563eb"],["Ganancias Paola", gananciaPoala, "#7c3aed"]].map(([lb,v,cl])=>(
+              <div key={lb} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #f1f5f9"}}>
+                <div>
+                  <span style={{fontSize:13,color:"#374151",fontWeight:600}}>{lb}</span>
+                  <div style={{fontSize:10,color:"#9ca3af",marginTop:1}}>Se actualiza automáticamente</div>
+                </div>
+                <span style={{fontWeight:800,fontSize:14,color:v>=0?cl:"#dc2626"}}>{F(v)}</span>
+              </div>
+            ))}
+
+            {/* ══ TOTALES FINALES ══ */}
+            <div style={{marginTop:10,borderTop:"2px solid #1e1b4b",paddingTop:10}}>
+              {[
+                ["Total",           totalGeneral,    "#1e1b4b", true ],
+                ["Prestados",       totalPrestados,  "#2563eb", false],
+                ["Efectivo (caja)", caja,            "#16a34a", false],
+              ].map(([lb,v,cl,bold])=>(
+                <div key={lb} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",
+                  borderBottom:"1px solid #f1f5f9"}}>
+                  <span style={{fontSize:13,fontWeight:bold?800:500,color:bold?"#1e1b4b":"#374151"}}>{lb}</span>
+                  <span style={{fontWeight:800,fontSize:bold?15:13,color:cl}}>{F(v)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── CAJA CARD ───────────────────────────────────────────────────────────────
+// El efectivo en caja se actualiza automáticamente con cada acción.
+// El botón de ajuste sirve SOLO para corregir diferencias con la realidad
+// (ej: billete que se olvidó registrar). Suma/resta sobre el valor actual.
+function CajaCard({ caja, setCaja, toast2 }) {
+  const [open, setOpen] = useState(false);
+  const [modo, setModo] = useState("sumar"); // "sumar" | "restar"
+  const [monto, setMonto] = useState("");
+
+  const aplicar = () => {
+    const val = Number(monto.replace(/\D/g,""));
+    if (!val) return;
+    const delta = modo === "sumar" ? val : -val;
+    setCaja(prev => prev + delta);
+    toast2((modo === "sumar" ? "💵 +" : "💵 -") + val.toLocaleString("es-CO") + " ajuste manual");
+    setMonto(""); setOpen(false);
+  };
+
+  return (
+    <div style={{background:"#f0fdf4", border:"2px solid #bbf7d0", borderRadius:14, padding:"14px 16px", marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}}>
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: open ? 12 : 0}}>
+        <div>
+          <div style={{fontSize:12, color:"#6b7280", fontWeight:600, marginBottom:2}}>💵 Efectivo en Caja</div>
+          <div style={{fontSize:26, fontWeight:800, color:"#15803d"}}>{("$ " + Math.round(caja || 0).toLocaleString("es-CO"))}</div>
+          <div style={{fontSize:10, color:"#16a34a", marginTop:2}}>Se actualiza automáticamente</div>
+        </div>
+        <button
+          onClick={() => { setOpen(o => !o); setMonto(""); }}
+          style={{background: open ? "#e5e7eb" : "#16a34a", color: open ? "#374151" : "#fff",
+            border:"none", borderRadius:8, padding:"8px 12px", fontSize:12, fontWeight:700, cursor:"pointer"}}
+        >
+          {open ? "Cancelar" : "⚙️ Ajuste"}
+        </button>
+      </div>
+
+      {open && (
+        <div style={{borderTop:"1px solid #bbf7d0", paddingTop:12}}>
+          <div style={{fontSize:12, color:"#6b7280", marginBottom:8}}>
+            Usá esto solo si hay una diferencia con el efectivo real (ej: un ingreso o gasto que no pasó por la app).
+          </div>
+          <div style={{display:"flex", gap:8, marginBottom:8}}>
+            {[["sumar","✅ Sumar","#16a34a"],["restar","❌ Restar","#dc2626"]].map(([v,lb,cl]) => (
+              <button key={v} onClick={() => setModo(v)}
+                style={{flex:1, padding:"8px", borderRadius:8, border:`2px solid ${modo===v ? cl : "#e5e7eb"}`,
+                  background: modo===v ? cl+"15" : "#fff", color: modo===v ? cl : "#6b7280",
+                  fontWeight:700, fontSize:13, cursor:"pointer"}}>
+                {lb}
+              </button>
+            ))}
+          </div>
+          <div style={{display:"flex", gap:8}}>
+            <input
+              type="number"
+              placeholder="Monto a ajustar..."
+              value={monto}
+              onChange={e => setMonto(e.target.value)}
+              style={{flex:1, padding:"10px 12px", borderRadius:8, border:"1.5px solid #d1d5db",
+                fontSize:14, outline:"none", boxSizing:"border-box"}}
+            />
+            <button onClick={aplicar}
+              style={{background: modo==="sumar" ? "#16a34a" : "#dc2626", color:"#fff",
+                border:"none", borderRadius:8, padding:"0 16px", fontWeight:700, fontSize:14, cursor:"pointer"}}>
+              Aplicar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── CALCULADORA RÁPIDA DE CUOTAS ────────────────────────────────────────────
+function CalcRapida() {
+  const [modId, setModId] = useState("");
+  const mod = MODS.find(m => m.id === modId);
+
+  return (
+    <div style={{
+      background: "#fffbeb",
+      border: "2px solid #fbbf24",
+      borderRadius: 14,
+      padding: "14px 16px",
+      marginBottom: 10,
+      boxShadow: "0 1px 4px rgba(0,0,0,0.07)"
+    }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 22 }}>🧮</span>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 15, color: "#92400e" }}>Calculadora de Cuota</div>
+          <div style={{ fontSize: 11, color: "#b45309" }}>Consulta rápida · igual que tu Excel</div>
+        </div>
+      </div>
+
+      {/* Leyenda de convención */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+        {[[".S","Semanal","#2563eb"],[".Q","Quincenal","#7c3aed"],[".M","Mensual","#16a34a"]].map(([sf,lb,cl])=>(
+          <div key={sf} style={{ background:"#fff", border:`1.5px solid ${cl}`, borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700, color:cl, display:"flex", gap:4, alignItems:"center" }}>
+            <span style={{ fontFamily:"monospace" }}>{sf}</span>
+            <span style={{ color:"#6b7280", fontWeight:400 }}>= {lb}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Selector agrupado por monto */}
+      <select
+        value={modId}
+        onChange={e => setModId(e.target.value)}
+        style={{
+          width: "100%", padding: "11px 12px", borderRadius: 9,
+          border: "2px solid #fbbf24", fontSize: 14, outline: "none",
+          background: "#fff", fontWeight: 600, color: "#1f2937",
+          boxSizing: "border-box", cursor: "pointer"
+        }}
+      >
+        <option value="">Seleccioná una modalidad...</option>
+        {MONTOS_UNICOS.map(monto => (
+          <optgroup key={monto} label={`── $ ${(monto/1000).toLocaleString("es-CO")}.000 ──`}>
+            {modsDeMontos(monto).map(m =>
+              <option key={m.id} value={m.id}>{m.label}</option>
+            )}
+          </optgroup>
+        ))}
+      </select>
+
+      {/* Resultado */}
+      {mod ? (
+        <div style={{ marginTop: 12 }}>
+          {/* Cuota destacada */}
+          <div style={{
+            background: "#1d4ed8", borderRadius: 10,
+            padding: "12px 16px", display: "flex",
+            justifyContent: "space-between", alignItems: "center",
+            marginBottom: 10
+          }}>
+            <div>
+              <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: 600, marginBottom: 2 }}>
+                CUOTA ({mod.tipo === "semanal" ? "SEMANAL" : mod.tipo === "quincenal" ? "QUINCENAL" : "MENSUAL"})
+              </div>
+              <div style={{ color: "#fff", fontWeight: 900, fontSize: 28, letterSpacing: -0.5 }}>{fmt(mod.cuota)}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 11 }}>{mod.pagos} pago{mod.pagos !== 1 ? "s" : ""}</div>
+              <div style={{ color: "#93c5fd", fontWeight: 800, fontSize: 14, marginTop: 2 }}>{mod.label}</div>
+            </div>
+          </div>
+
+          {/* Detalle */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {[
+              ["💵 Monto prestado",   fmt(mod.monto),           "#1d4ed8"],
+              ["📊 Total a cobrar",   fmt(mod.cuota * mod.pagos),"#374151"],
+              ["✅ Ganancia total",   fmt(mod.ganancia),         "#16a34a"],
+              ["📈 Ganancia semanal", fmt(mod.semanal),          "#7c3aed"],
+            ].map(([lb, v, cl]) => (
+              <div key={lb} style={{ background: "#fff", borderRadius: 8, padding: "9px 11px", border: "1px solid #fde68a" }}>
+                <div style={{ fontSize: 10, color: "#92400e", marginBottom: 3 }}>{lb}</div>
+                <div style={{ fontWeight: 800, color: cl, fontSize: 13 }}>{v}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          marginTop: 10, padding: 14, background: "#fff",
+          borderRadius: 8, border: "1px dashed #fbbf24",
+          textAlign: "center", color: "#b45309", fontSize: 13
+        }}>
+          Seleccioná una modalidad para ver la cuota al instante
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+  </script>
+</body>
+</html>
