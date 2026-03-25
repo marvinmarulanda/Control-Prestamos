@@ -11,18 +11,7 @@
   <title>Gestor de Préstamos</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-    body{
-      background:#f4f6fb;
-      font-family:system-ui,-apple-system,sans-serif;
-      overscroll-behavior:none;
-      /* safe area para iOS notch */
-      padding-top: env(safe-area-inset-top, 0px);
-      padding-bottom: env(safe-area-inset-bottom, 0px);
-      padding-left: env(safe-area-inset-left, 0px);
-      padding-right: env(safe-area-inset-right, 0px);
-    }
-    /* Quitar el padding del body para que el header llegue hasta arriba del todo */
-    body { padding-top: 0; }
+    body{background:#f4f6fb;font-family:system-ui,-apple-system,sans-serif;overscroll-behavior:none;}
     select,input,textarea,button{font-family:inherit;}
     #root{max-width:440px;margin:0 auto;}
   </style>
@@ -222,6 +211,20 @@ function genDates(start,pagos,tipo){
   return dates;
 }
 
+// Genera fechas donde la primera cuota ES firstDate, el resto se calculan desde ahí
+function genDatesFromFirst(firstDate,pagos,tipo){
+  const dates=[];
+  const d=new Date(firstDate+"T12:00:00");
+  dates.push(d.toISOString().split("T")[0]); // primera cuota = fecha elegida
+  for(let i=1;i<pagos;i++){
+    if(tipo==="semanal")d.setDate(d.getDate()+7);
+    else if(tipo==="quincenal")d.setDate(d.getDate()+15);
+    else d.setMonth(d.getMonth()+1);
+    dates.push(d.toISOString().split("T")[0]);
+  }
+  return dates;
+}
+
 function Modal({title,onClose,children}){
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:999,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
@@ -287,7 +290,7 @@ function App(){
   const [calView,setCalView]=useState("mes");
   const [calDate,setCalDate]=useState({year:new Date().getFullYear(),month:new Date().getMonth()});
   const [fCli,setFCli]=useState({name:"",phone:""});
-  const [fLoan,setFLoan]=useState({clientId:"",modId:"",startDate:todayStr(),nota:"",esManual:false,manualMonto:"",manualCuota:"",manualPagos:"",manualTipo:"quincenal"});
+  const [fLoan,setFLoan]=useState({clientId:"",modId:"",startDate:todayStr(),firstPayDate:"",nota:"",esManual:false,manualMonto:"",manualCuota:"",manualPagos:"",manualTipo:"quincenal"});
   const [cajaInp,setCajaInp]=useState("");
   const [loaded,setLoaded]=useState(false);
   const [toast,setToast]=useState(null);
@@ -356,6 +359,10 @@ function App(){
   });
   const next7=allInst.filter(i=>!i.paid&&diffDays(i.dueDate)>=0&&diffDays(i.dueDate)<=7);
   const overdueList=allInst.filter(i=>i.status==="vencida");
+  // Préstamos activos con exactamente 1 cuota pendiente
+  const ultimaCuotaLoans=activeLoans
+    .filter(l=>l.installments.filter(i=>!i.paid).length===1)
+    .map(l=>({loan:l,clientName:clients.find(c=>c.id===l.clientId)?.name||"?"}));
 
   const addClient=()=>{
     if(!fCli.name.trim())return;
@@ -389,10 +396,12 @@ function App(){
       const mod=MODS.find(m=>m.id===fLoan.modId);if(!mod)return;
       ({monto,cuota,pagos,tipo,ganancia,semanal}=mod);
     }
-    const dates=genDates(fLoan.startDate,pagos,tipo);
+    // Usar fecha del primer pago si la eligió, sino calcular desde startDate
+    const baseDate = fLoan.firstPayDate || fLoan.startDate;
+    const dates=genDatesFromFirst(baseDate,pagos,tipo);
     setLoans(p=>[...p,{id:uid(),clientId:fLoan.clientId,startDate:fLoan.startDate,monto,cuota,ganancia,semanal,pagos,tipo,nota:fLoan.nota,installments:dates.map((d,i)=>({id:String(i+1),num:i+1,dueDate:d,paid:false}))}]);
     setCaja(prev=>prev-monto);
-    setFLoan({clientId:"",modId:"",startDate:todayStr(),nota:"",esManual:false,manualMonto:"",manualCuota:"",manualPagos:"",manualTipo:"quincenal"});
+    setFLoan({clientId:"",modId:"",startDate:todayStr(),firstPayDate:"",nota:"",esManual:false,manualMonto:"",manualCuota:"",manualPagos:"",manualTipo:"quincenal"});
     setModal(null);
     toast2("💸 -"+Math.round(monto).toLocaleString("es-CO")+" prestado · Préstamo creado ✓");
   };
@@ -589,7 +598,7 @@ function App(){
   );
 
   return(
-    <div style={{maxWidth:440,margin:"0 auto",minHeight:"100vh",background:"#f4f6fb",fontFamily:"system-ui,sans-serif",position:"relative"}}>
+    <div style={{maxWidth:440,margin:"0 auto",minHeight:"100vh",background:"#f4f6fb",fontFamily:"system-ui,sans-serif",position:"relative",overflowX:"hidden"}}>
       {toast&&<div style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",background:"#1d4ed8",color:"#fff",padding:"10px 22px",borderRadius:20,zIndex:9999,fontWeight:700,fontSize:14,boxShadow:"0 4px 14px rgba(0,0,0,0.25)"}}>{toast}</div>}
 
       <div style={{background:"#2563eb",padding:"env(safe-area-inset-top, 14px) 20px 12px",paddingTop:"calc(env(safe-area-inset-top, 0px) + 14px)",position:"sticky",top:0,zIndex:100}}>
@@ -649,35 +658,34 @@ function App(){
             </div>
 
             {/* Alerts */}
-            {(overdueList.length>0||next7.length>0)&&(
+            {(overdueList.length>0||ultimaCuotaLoans.length>0)&&(
               <div style={S.card}>
                 <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>🔔 Alertas Importantes</h3>
                 {overdueList.length>0&&<div style={{background:"#fee2e2",borderRadius:8,padding:"10px 12px",marginBottom:8}}><div style={{color:"#dc2626",fontWeight:700,fontSize:13}}>⚠️ {overdueList.length} cuota{overdueList.length!==1?"s":""} vencida{overdueList.length!==1?"s":""}</div><div style={{color:"#dc2626",fontSize:12}}>Revisá el calendario para ver los detalles</div></div>}
-                {next7.length>0&&<div style={{background:"#fef3c7",borderRadius:8,padding:"10px 12px"}}><div style={{color:"#d97706",fontWeight:700,fontSize:13}}>📅 {next7.length} cuota{next7.length!==1?"s":""} en los próximos 7 días</div></div>}
+                {ultimaCuotaLoans.length>0&&(
+                  <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 12px"}}>
+                    <div style={{color:"#16a34a",fontWeight:700,fontSize:13,marginBottom:6}}>✅ Préstamos por finalizar — falta 1 cuota</div>
+                    {ultimaCuotaLoans.map(({loan,clientName})=>(
+                      <div key={loan.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderTop:"1px solid #dcfce7"}}>
+                        <div>
+                          <span style={{fontWeight:700,fontSize:13,color:"#15803d"}}>{clientName}</span>
+                          <span style={{fontSize:12,color:"#6b7280",marginLeft:6}}>Préstamo {fmt(loan.monto)}</span>
+                        </div>
+                        <span style={{fontWeight:800,color:"#16a34a",fontSize:13}}>{fmt(loan.cuota)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Next 7 days */}
-            {next7.length>0&&(
-              <div style={S.card}>
-                <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>📋 Próximas Cuotas</h3>
-                {next7.sort((a,b)=>a.dueDate.localeCompare(b.dueDate)).map(i=>(
-                  <div key={i.loanId+i.id} style={{padding:"8px 0",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <div>
-                      <div style={{fontWeight:700,fontSize:14}}>{i.clientName}</div>
-                      <div style={{fontSize:12,color:"#6b7280"}}>{fmt(i.cuota)} · {fmtD(i.dueDate)}</div>
-                    </div>
-                    <span style={{background:"#eff6ff",color:"#2563eb",padding:"4px 10px",borderRadius:20,fontSize:12,fontWeight:700}}>{diffDays(i.dueDate)===0?"Hoy":`${diffDays(i.dueDate)}d`}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+
 
             {/* Quick actions */}
             <div style={S.card}>
               <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>⚡ Acciones Rápidas</h3>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                {[["🧑","Nuevo Cliente","#16a34a",()=>{setFCli({name:"",phone:""});setModal("new-client");}],["💰","Nuevo Préstamo","#2563eb",()=>{setFLoan({clientId:"",modId:"",startDate:todayStr(),nota:"",esManual:false,manualMonto:"",manualCuota:"",manualPagos:"",manualTipo:"quincenal"});setModal("new-loan");}],["📅","Calendario","#d97706",()=>setTab("calendar")],["📊","Reportes","#7c3aed",()=>setTab("reports")]].map(([ic,lb,cl,fn])=>(
+                {[["🧑","Nuevo Cliente","#16a34a",()=>{setFCli({name:"",phone:""});setModal("new-client");}],["💰","Nuevo Préstamo","#2563eb",()=>{setFLoan({clientId:"",modId:"",startDate:todayStr(),firstPayDate:"",nota:"",esManual:false,manualMonto:"",manualCuota:"",manualPagos:"",manualTipo:"quincenal"});setModal("new-loan");}],["📅","Calendario","#d97706",()=>setTab("calendar")],["📊","Reportes","#7c3aed",()=>setTab("reports")]].map(([ic,lb,cl,fn])=>(
                   <button key={lb} onClick={fn} style={{padding:"16px 8px",background:"#fff",border:`2px solid ${cl}`,borderRadius:12,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
                     <span style={{fontSize:28}}>{ic}</span>
                     <span style={{fontSize:12,fontWeight:700,color:cl}}>{lb}</span>
@@ -734,7 +742,7 @@ function App(){
             </div>
             <div style={{display:"flex",gap:8,marginBottom:10}}>
               <input style={{...S.inp,flex:1}} placeholder="Buscar por cliente..." value={search} onChange={e=>setSearch(e.target.value)}/>
-              <button onClick={()=>{setFLoan({clientId:"",modId:"",startDate:todayStr(),nota:"",esManual:false,manualMonto:"",manualCuota:"",manualPagos:"",manualTipo:"quincenal"});setModal("new-loan");}} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:8,padding:"0 14px",fontWeight:700,cursor:"pointer",fontSize:13,whiteSpace:"nowrap"}}>+ Nuevo</button>
+              <button onClick={()=>{setFLoan({clientId:"",modId:"",startDate:todayStr(),firstPayDate:"",nota:"",esManual:false,manualMonto:"",manualCuota:"",manualPagos:"",manualTipo:"quincenal"});setModal("new-loan");}} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:8,padding:"0 14px",fontWeight:700,cursor:"pointer",fontSize:13,whiteSpace:"nowrap"}}>+ Nuevo</button>
             </div>
             <div style={{display:"flex",gap:8,marginBottom:10}}>
               {[["Activos",false],[`Completados`,true]].map(([lb,v])=>(
@@ -935,8 +943,16 @@ function LoanModal({fLoan,setFLoan,clients,onAdd,onClose}){
         </>
       )}
 
-      <label style={S.lbl}>Fecha del préstamo *</label>
+      <label style={S.lbl}>📅 Fecha del préstamo *</label>
       <input type="date" style={S.inp} value={fLoan.startDate} onChange={e=>setFLoan(p=>({...p,startDate:e.target.value}))}/>
+      <label style={S.lbl}>💳 Fecha del primer pago *</label>
+      <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>Las siguientes cuotas se calculan desde esta fecha en adelante</div>
+      <input type="date" style={{...S.inp,borderColor:"#16a34a"}} value={fLoan.firstPayDate} onChange={e=>setFLoan(p=>({...p,firstPayDate:e.target.value}))}/>
+      {fLoan.firstPayDate&&fLoan.startDate&&fLoan.firstPayDate!==fLoan.startDate&&(
+        <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"7px 10px",marginTop:4,fontSize:12,color:"#16a34a"}}>
+          ✓ Préstamo el {fmtD(fLoan.startDate)} · Primer pago el {fmtD(fLoan.firstPayDate)}
+        </div>
+      )}
       <label style={S.lbl}>Notas adicionales</label>
       <textarea style={{...S.inp,height:60,resize:"none"}} placeholder="Info adicional..." value={fLoan.nota} onChange={e=>setFLoan(p=>({...p,nota:e.target.value}))}/>
       <button style={S.btnP} onClick={onAdd}>Crear Préstamo</button>
