@@ -9,12 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="Préstamos"/>
   <meta name="theme-color" content="#2563eb"/>
   <title>Gestor de Préstamos</title>
-  <style>
-    *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-    body{background:#f4f6fb;font-family:system-ui,-apple-system,sans-serif;overscroll-behavior:none;}
-    select,input,textarea,button{font-family:inherit;}
-    #root{max-width:440px;margin:0 auto;}
-  </style>
+  <style>*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}body{background:#f4f6fb;font-family:system-ui,-apple-system,sans-serif;overscroll-behavior:none;}select,input,textarea,button{font-family:inherit;}#root{max-width:440px;margin:0 auto;}</style>
 </head>
 <body>
   <div id="root"></div>
@@ -630,33 +625,6 @@ function App(){
             {/* Caja */}
             <CajaCard caja={caja} setCaja={setCaja} toast2={toast2} />
 
-            {/* ─── BILLETERA ─────────────────────────────────────── */}
-            {billetera && <BilleteraCard
-              billetera={billetera}
-              updBilletera={updBilletera}
-              caja={caja}
-              setCaja={setCaja}
-              activeLoans={activeLoans}
-              toast2={toast2}
-            />}
-
-            {/* ─── CALCULADORA RÁPIDA ─────────────────────────────────── */}
-            <CalcRapida />
-
-            {/* Financial summary */}
-            <div style={S.card}>
-              <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>💰 Resumen Financiero</h3>
-              {[["📦","#1d4ed8",totalCap,"Capital Prestado"],["✅","#16a34a",totalPaid,"Total Cobrado"],["⏳","#d97706",totalPend,"Por Cobrar"],["🔥","#7c3aed",totalSem,"Ganancia Semanal"]].map(([ic,cl,v,lb])=>(
-                <div key={lb} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #f3f4f6"}}>
-                  <div style={{width:36,height:36,borderRadius:"50%",background:cl+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{ic}</div>
-                  <div style={{flex:1}}>
-                    <div style={{fontWeight:800,color:cl,fontSize:16}}>{fmt(v)}</div>
-                    <div style={{fontSize:11,color:"#6b7280"}}>{lb}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
             {/* Alerts */}
             {(overdueList.length>0||ultimaCuotaLoans.length>0)&&(
               <div style={S.card}>
@@ -678,6 +646,33 @@ function App(){
                 )}
               </div>
             )}
+
+            {/* ─── CALCULADORA RÁPIDA ─────────────────────────────────── */}
+            <CalcRapida />
+
+            {/* ─── BILLETERA ─────────────────────────────────────── */}
+            {billetera && <BilleteraCard
+              billetera={billetera}
+              updBilletera={updBilletera}
+              caja={caja}
+              setCaja={setCaja}
+              activeLoans={activeLoans}
+              toast2={toast2}
+            />}
+
+            {/* Financial summary */}
+            <div style={S.card}>
+              <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>💰 Resumen Financiero</h3>
+              {[["📦","#1d4ed8",totalCap,"Capital Prestado"],["✅","#16a34a",totalPaid,"Total Cobrado"],["⏳","#d97706",totalPend,"Por Cobrar"],["🔥","#7c3aed",totalSem,"Ganancia Semanal"]].map(([ic,cl,v,lb])=>(
+                <div key={lb} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #f3f4f6"}}>
+                  <div style={{width:36,height:36,borderRadius:"50%",background:cl+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{ic}</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:800,color:cl,fontSize:16}}>{fmt(v)}</div>
+                    <div style={{fontSize:11,color:"#6b7280"}}>{lb}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
 
 
 
