@@ -291,6 +291,8 @@ function App(){
   const [toast,setToast]=useState(null);
   const [confirm,setConfirm]=useState(null); // {msg, onOk}
   const [showCompleted,setShowCompleted]=useState(false);
+  const [movCaja,setMovCaja]=useState([]);       // [{id,fecha,desc,monto,tipo}]
+  const [lastBackup,setLastBackup]=useState(null); // ISO date string
   // ── Billetera / Finanzas ──
   const BILLETERA_DEFAULT = {
     grupos:[
@@ -321,6 +323,8 @@ function App(){
         setClients(d.clients||[]);
         setLoans(d.loans||[]);
         setCaja(d.caja??2884000);
+        setMovCaja(d.movCaja??[]);
+        setLastBackup(d.lastBackup??null);
         const b = d.billetera ?? BILLETERA_DEFAULT;
         // migrate old data: add tipo to grupos if missing, remove socios
         if(b.grupos && b.grupos.length>=3){
@@ -336,9 +340,49 @@ function App(){
     });
   },[]);
 
-  useEffect(()=>{if(loaded&&billetera)save({clients,loans,caja,billetera});},[clients,loans,caja,billetera,loaded]);
+  useEffect(()=>{if(loaded&&billetera)save({clients,loans,caja,billetera,movCaja,lastBackup});},[clients,loans,caja,billetera,movCaja,lastBackup,loaded]);
 
   const toast2=(msg)=>{setToast(msg);setTimeout(()=>setToast(null),2500);};
+
+  // ── Movimientos de caja ──────────────────────────────────────────────────
+  const addMov=(desc,monto,tipo)=>{
+    setMovCaja(prev=>[{id:uid(),fecha:todayStr(),desc,monto,tipo},...prev].slice(0,200));
+  };
+
+  // ── Export backup ────────────────────────────────────────────────────────
+  const exportBackup=()=>{
+    const data={clients,loans,caja,billetera,movCaja,lastBackup,exportedAt:new Date().toISOString()};
+    const json=JSON.stringify(data,null,2);
+    const blob=new Blob([json],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    const fecha=todayStr();
+    a.href=url; a.download=`prestamos_backup_${fecha}.json`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    setLastBackup(todayStr());
+    toast2("✅ Backup exportado correctamente");
+  };
+
+  // ── Import backup ────────────────────────────────────────────────────────
+  const importBackup=(e)=>{
+    const file=e.target.files[0]; if(!file)return;
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      try{
+        const d=JSON.parse(ev.target.result);
+        if(d.clients) setClients(d.clients);
+        if(d.loans)   setLoans(d.loans);
+        if(d.caja!=null) setCaja(d.caja);
+        if(d.billetera)  setBilletera(d.billetera);
+        if(d.movCaja)    setMovCaja(d.movCaja);
+        setLastBackup(todayStr());
+        toast2("✅ Datos importados correctamente");
+      }catch{toast2("❌ Error: archivo inválido");}
+    };
+    reader.readAsText(file);
+    e.target.value="";
+  };
 
   const activeLoans=loans.filter(l=>l.installments.some(i=>!i.paid));
   const completedLoans=loans.filter(l=>l.installments.every(i=>i.paid));
@@ -354,10 +398,15 @@ function App(){
   });
   const next7=allInst.filter(i=>!i.paid&&diffDays(i.dueDate)>=0&&diffDays(i.dueDate)<=7);
   const overdueList=allInst.filter(i=>i.status==="vencida");
-  // Préstamos activos con exactamente 1 cuota pendiente
-  const ultimaCuotaLoans=activeLoans
-    .filter(l=>l.installments.filter(i=>!i.paid).length===1)
-    .map(l=>({loan:l,clientName:clients.find(c=>c.id===l.clientId)?.name||"?"}));
+  // Préstamos activos con 1 o 2 cuotas pendientes
+  const porFinalizarLoans=activeLoans
+    .filter(l=>{ const p=l.installments.filter(i=>!i.paid).length; return p===1||p===2; })
+    .map(l=>({
+      loan:l,
+      clientName:clients.find(c=>c.id===l.clientId)?.name||"?",
+      cuotasPendientes:l.installments.filter(i=>!i.paid)
+    }))
+    .sort((a,b)=>a.cuotasPendientes.length-b.cuotasPendientes.length);
 
   const addClient=()=>{
     if(!fCli.name.trim())return;
@@ -398,6 +447,8 @@ function App(){
     setCaja(prev=>prev-monto);
     setFLoan({clientId:"",modId:"",startDate:todayStr(),firstPayDate:"",nota:"",esManual:false,manualMonto:"",manualCuota:"",manualPagos:"",manualTipo:"quincenal"});
     setModal(null);
+    const cli3=clients.find(c=>c.id===fLoan.clientId);
+    addMov('💸 Préstamo a '+(cli3?.name||'?'), monto, 'salida');
     toast2("💸 -"+Math.round(monto).toLocaleString("es-CO")+" prestado · Préstamo creado ✓");
   };
   const deleteLoan=(id)=>{
@@ -444,7 +495,14 @@ function App(){
       updBilletera(b=>{b.gananciaApp=(b.gananciaApp||0)-loan.ganancia;return b;});
       toast2('↩ Ganancia revertida -'+Math.round(loan.ganancia).toLocaleString('es-CO'));
     } else {
-      toast2(marcandoPagada ? '💵 +'+Math.round(loan.cuota).toLocaleString('es-CO')+' ingresó a caja' : '💵 -'+Math.round(loan.cuota).toLocaleString('es-CO')+' revertido de caja');
+      const cli2=clients.find(c=>c.id===loan.clientId);
+    if(marcandoPagada){
+      addMov('💵 Cuota '+(cli2?.name||'?')+' · '+fmt(loan.monto), loan.cuota, 'entrada');
+      toast2('💵 +'+Math.round(loan.cuota).toLocaleString('es-CO')+' ingresó a caja');
+    } else {
+      addMov('↩ Revertido '+(cli2?.name||'?'), loan.cuota, 'salida');
+      toast2('💵 -'+Math.round(loan.cuota).toLocaleString('es-CO')+' revertido de caja');
+    }
     }
   };
 
@@ -626,26 +684,63 @@ function App(){
             <CajaCard caja={caja} setCaja={setCaja} toast2={toast2} />
 
             {/* Alerts */}
-            {(overdueList.length>0||ultimaCuotaLoans.length>0)&&(
-              <div style={S.card}>
-                <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>🔔 Alertas Importantes</h3>
-                {overdueList.length>0&&<div style={{background:"#fee2e2",borderRadius:8,padding:"10px 12px",marginBottom:8}}><div style={{color:"#dc2626",fontWeight:700,fontSize:13}}>⚠️ {overdueList.length} cuota{overdueList.length!==1?"s":""} vencida{overdueList.length!==1?"s":""}</div><div style={{color:"#dc2626",fontSize:12}}>Revisá el calendario para ver los detalles</div></div>}
-                {ultimaCuotaLoans.length>0&&(
-                  <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 12px"}}>
-                    <div style={{color:"#16a34a",fontWeight:700,fontSize:13,marginBottom:6}}>✅ Préstamos por finalizar — falta 1 cuota</div>
-                    {ultimaCuotaLoans.map(({loan,clientName})=>(
-                      <div key={loan.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderTop:"1px solid #dcfce7"}}>
-                        <div>
-                          <span style={{fontWeight:700,fontSize:13,color:"#15803d"}}>{clientName}</span>
-                          <span style={{fontSize:12,color:"#6b7280",marginLeft:6}}>Préstamo {fmt(loan.monto)}</span>
+            {(()=>{
+              const diasSinBackup = lastBackup ? Math.floor((new Date()-new Date(lastBackup+"T12:00:00"))/86400000) : 999;
+              const alertaBackup = diasSinBackup >= 7;
+              const hayAlertas = overdueList.length>0 || porFinalizarLoans.length>0 || alertaBackup;
+              if(!hayAlertas) return null;
+              return (
+                <div style={S.card}>
+                  <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>🔔 Alertas Importantes</h3>
+
+                  {/* Vencidas */}
+                  {overdueList.length>0&&(
+                    <div style={{background:"#fee2e2",borderRadius:8,padding:"10px 12px",marginBottom:8}}>
+                      <div style={{color:"#dc2626",fontWeight:700,fontSize:13}}>⚠️ {overdueList.length} cuota{overdueList.length!==1?"s":""} vencida{overdueList.length!==1?"s":""}</div>
+                      <div style={{color:"#dc2626",fontSize:12}}>Revisá el calendario para ver los detalles</div>
+                    </div>
+                  )}
+
+                  {/* Por finalizar — 1 o 2 cuotas */}
+                  {porFinalizarLoans.length>0&&(
+                    <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 12px",marginBottom:8}}>
+                      <div style={{color:"#16a34a",fontWeight:700,fontSize:13,marginBottom:8}}>✅ Préstamos por finalizar</div>
+                      {porFinalizarLoans.map(({loan,clientName,cuotasPendientes})=>(
+                        <div key={loan.id} style={{borderTop:"1px solid #dcfce7",paddingTop:6,marginTop:6}}>
+                          {/* Header: cliente + monto */}
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                            <div>
+                              <span style={{fontWeight:800,fontSize:13,color:"#15803d"}}>{clientName}</span>
+                              <span style={{fontSize:11,color:"#6b7280",marginLeft:6}}>Préstamo {fmt(loan.monto)}</span>
+                            </div>
+                            <span style={{background:"#dcfce7",color:"#16a34a",borderRadius:20,padding:"2px 8px",fontSize:11,fontWeight:700}}>
+                              {cuotasPendientes.length === 1 ? "1 cuota" : "2 cuotas"}
+                            </span>
+                          </div>
+                          {/* Cuotas con fecha */}
+                          {cuotasPendientes.map(inst=>(
+                            <div key={inst.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0"}}>
+                              <span style={{fontWeight:800,color:"#16a34a",fontSize:13}}>{fmt(loan.cuota)}</span>
+                              <span style={{fontSize:12,color:"#6b7280"}}>{fmtD(inst.dueDate)}</span>
+                            </div>
+                          ))}
                         </div>
-                        <span style={{fontWeight:800,color:"#16a34a",fontSize:13}}>{fmt(loan.cuota)}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Backup */}
+                  {alertaBackup&&(
+                    <div style={{background:"#fffbeb",border:"1px solid #fbbf24",borderRadius:8,padding:"10px 12px"}}>
+                      <div style={{color:"#92400e",fontWeight:700,fontSize:13,marginBottom:2}}>
+                        💾 {lastBackup ? `Han pasado ${diasSinBackup} días desde tu último backup` : "Nunca hiciste un backup"}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+                      <div style={{color:"#b45309",fontSize:12}}>Exportá tus datos desde Reportes → Backup</div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* ─── CALCULADORA RÁPIDA ─────────────────────────────────── */}
             <CalcRapida />
@@ -807,7 +902,7 @@ function App(){
               })}
             </div>
 
-            <div style={{...S.card,marginBottom:20}}>
+            <div style={{...S.card,marginBottom:10}}>
               <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>🏆 Top Clientes por Monto</h3>
               {clients.map(c=>{const t=loans.filter(l=>l.clientId===c.id).reduce((s,l)=>s+l.monto,0);return{...c,t};}).filter(c=>c.t>0).sort((a,b)=>b.t-a.t).slice(0,8).map((c,i)=>(
                 <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #f3f4f6"}}>
@@ -818,6 +913,72 @@ function App(){
                   <div style={{fontWeight:700,color:"#1d4ed8"}}>{fmt(c.t)}</div>
                 </div>
               ))}
+            </div>
+
+            {/* ── Resumen mensual ── */}
+            {(()=>{
+              const meses={};
+              loans.forEach(l=>{
+                l.installments.filter(i=>i.paid).forEach(i=>{
+                  const k=i.dueDate.slice(0,7);
+                  meses[k]=(meses[k]||0)+l.cuota;
+                });
+              });
+              const lista=Object.entries(meses).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,6);
+              if(!lista.length) return null;
+              return(
+                <div style={{...S.card,marginBottom:10}}>
+                  <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>📅 Cobrado por Mes</h3>
+                  {lista.map(([mes,total])=>{
+                    const [y,m]=mes.split("-");
+                    return(
+                      <div key={mes} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #f3f4f6"}}>
+                        <span style={{fontSize:13,color:"#374151"}}>{["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"][parseInt(m)-1]} {y}</span>
+                        <span style={{fontWeight:800,color:"#16a34a"}}>{fmt(total)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {/* ── Historial movimientos caja ── */}
+            {movCaja.length>0&&(
+              <div style={{...S.card,marginBottom:10}}>
+                <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>📋 Últimos movimientos de caja</h3>
+                {movCaja.slice(0,15).map(m=>(
+                  <div key={m.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f3f4f6"}}>
+                    <div>
+                      <div style={{fontSize:13,color:"#374151"}}>{m.desc}</div>
+                      <div style={{fontSize:11,color:"#9ca3af"}}>{fmtD(m.fecha)}</div>
+                    </div>
+                    <span style={{fontWeight:800,fontSize:13,color:m.tipo==="entrada"?"#16a34a":"#dc2626"}}>
+                      {m.tipo==="entrada"?"+":"-"}{fmt(m.monto)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── Backup ── */}
+            <div style={{...S.card,marginBottom:20}}>
+              <h3 style={{margin:"0 0 12px",fontSize:15,fontWeight:700}}>💾 Backup de Datos</h3>
+              {lastBackup&&(
+                <div style={{fontSize:12,color:"#6b7280",marginBottom:10}}>
+                  Último backup: <b style={{color:"#374151"}}>{fmtD(lastBackup)}</b>
+                </div>
+              )}
+              <button onClick={exportBackup}
+                style={{...S.btnP,background:"#16a34a",marginTop:0,marginBottom:8}}>
+                📤 Exportar backup (.json)
+              </button>
+              <label style={{...S.btnS,display:"block",textAlign:"center",cursor:"pointer",marginTop:0}}>
+                📥 Importar backup
+                <input type="file" accept=".json" onChange={importBackup} style={{display:"none"}}/>
+              </label>
+              <div style={{fontSize:11,color:"#9ca3af",marginTop:8,textAlign:"center"}}>
+                El archivo se guarda con la fecha de hoy en el nombre
+              </div>
             </div>
           </div>
         )}
@@ -1440,105 +1601,241 @@ function CajaCard({ caja, setCaja, toast2 }) {
   );
 }
 
-// ─── CALCULADORA RÁPIDA DE CUOTAS ────────────────────────────────────────────
+// ─── CALCULADORA REAL DE CUOTAS (con interpolación) ─────────────────────────
+// Sufijos de modalidad por número de pagos según tipo
+const SUFIJOS = {
+  semanal:   {12:"S", 16:"S", 20:"S"},
+  quincenal: {6:"Q",  8:"Q",  10:"Q"},
+  mensual:   {3:"M",  4:"M",  5:"M"},
+};
+// Todas las combinaciones disponibles (pagos x tipo)
+const COMBOS = [
+  {pagos:12, tipo:"semanal",   label:"12S · Semanal"},
+  {pagos:16, tipo:"semanal",   label:"16S · Semanal"},
+  {pagos:20, tipo:"semanal",   label:"20S · Semanal"},
+  {pagos:6,  tipo:"quincenal", label:"6Q · Quincenal"},
+  {pagos:8,  tipo:"quincenal", label:"8Q · Quincenal"},
+  {pagos:10, tipo:"quincenal", label:"10Q · Quincenal"},
+  {pagos:3,  tipo:"mensual",   label:"3M · Mensual"},
+  {pagos:4,  tipo:"mensual",   label:"4M · Mensual"},
+  {pagos:5,  tipo:"mensual",   label:"5M · Mensual"},
+];
+
+// Redondear al múltiplo de 5.000 más cercano
+const round5k = (n) => Math.round(n / 5000) * 5000;
+
+// Interpolar cuota/ganancia/semanal para un monto libre entre dos montos de la tabla
+function interpolar(monto, pagos, tipo) {
+  // Buscar mods del mismo pagos+tipo ordenadas por monto
+  const mods = MODS
+    .filter(m => m.pagos === pagos && m.tipo === tipo)
+    .sort((a, b) => a.monto - b.monto);
+
+  if (!mods.length) return null;
+
+  // Exacto
+  const exacto = mods.find(m => m.monto === monto);
+  if (exacto) return { cuota: exacto.cuota, ganancia: exacto.ganancia, semanal: exacto.semanal, esExacto: true };
+
+  // Fuera de rango
+  if (monto < mods[0].monto) return null;
+  if (monto > mods[mods.length - 1].monto) return null;
+
+  // Encontrar par inferior/superior
+  let inf = null, sup = null;
+  for (let i = 0; i < mods.length - 1; i++) {
+    if (monto > mods[i].monto && monto < mods[i+1].monto) {
+      inf = mods[i]; sup = mods[i+1]; break;
+    }
+  }
+  if (!inf || !sup) return null;
+
+  const t = (monto - inf.monto) / (sup.monto - inf.monto);
+  const cuota    = round5k(inf.cuota    + t * (sup.cuota    - inf.cuota));
+  const ganancia = round5k(inf.ganancia + t * (sup.ganancia - inf.ganancia));
+  const semanal  = round5k(inf.semanal  + t * (sup.semanal  - inf.semanal));
+  return { cuota, ganancia, semanal, esExacto: false, infMonto: inf.monto, supMonto: sup.monto };
+}
+
 function CalcRapida() {
+  const [montoInput, setMontoInput] = useState("");
+  const [combo, setCombo] = useState(null); // {pagos, tipo}
+  const [modo, setModo] = useState("libre"); // "libre" | "listado"
   const [modId, setModId] = useState("");
-  const mod = MODS.find(m => m.id === modId);
+
+  const montoNum = Number(montoInput.replace(/\D/g,"")) || 0;
+  const resultado = combo && montoNum >= 100000 ? interpolar(montoNum, combo.pagos, combo.tipo) : null;
+  const modExacto = MODS.find(m => m.id === modId);
 
   return (
-    <div style={{
-      background: "#fffbeb",
-      border: "2px solid #fbbf24",
-      borderRadius: 14,
-      padding: "14px 16px",
-      marginBottom: 10,
-      boxShadow: "0 1px 4px rgba(0,0,0,0.07)"
-    }}>
+    <div style={{ background:"#fffbeb", border:"2px solid #fbbf24", borderRadius:14, padding:"14px 16px", marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.07)" }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <span style={{ fontSize: 22 }}>🧮</span>
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+        <span style={{ fontSize:22 }}>🧮</span>
         <div>
-          <div style={{ fontWeight: 800, fontSize: 15, color: "#92400e" }}>Calculadora de Cuota</div>
-          <div style={{ fontSize: 11, color: "#b45309" }}>Consulta rápida · igual que tu Excel</div>
+          <div style={{ fontWeight:800, fontSize:15, color:"#92400e" }}>Calculadora de Cuota</div>
+          <div style={{ fontSize:11, color:"#b45309" }}>Calculá cualquier monto usando tus propias tasas</div>
         </div>
       </div>
 
-      {/* Leyenda de convención */}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-        {[[".S","Semanal","#2563eb"],[".Q","Quincenal","#7c3aed"],[".M","Mensual","#16a34a"]].map(([sf,lb,cl])=>(
-          <div key={sf} style={{ background:"#fff", border:`1.5px solid ${cl}`, borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700, color:cl, display:"flex", gap:4, alignItems:"center" }}>
-            <span style={{ fontFamily:"monospace" }}>{sf}</span>
-            <span style={{ color:"#6b7280", fontWeight:400 }}>= {lb}</span>
-          </div>
+      {/* Toggle modo */}
+      <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+        {[["libre","🔢 Monto libre"],["listado","📋 Del listado"]].map(([v,lb])=>(
+          <button key={v} onClick={()=>{setModo(v);setMontoInput("");setCombo(null);setModId("");}}
+            style={{ flex:1, padding:"8px 4px", borderRadius:8, border:`2px solid ${modo===v?"#f59e0b":"#e5e7eb"}`,
+              background:modo===v?"#fef3c7":"#fff", color:modo===v?"#92400e":"#6b7280",
+              fontWeight:700, fontSize:12, cursor:"pointer" }}>
+            {lb}
+          </button>
         ))}
       </div>
 
-      {/* Selector agrupado por monto */}
-      <select
-        value={modId}
-        onChange={e => setModId(e.target.value)}
-        style={{
-          width: "100%", padding: "11px 12px", borderRadius: 9,
-          border: "2px solid #fbbf24", fontSize: 14, outline: "none",
-          background: "#fff", fontWeight: 600, color: "#1f2937",
-          boxSizing: "border-box", cursor: "pointer"
-        }}
-      >
-        <option value="">Seleccioná una modalidad...</option>
-        {MONTOS_UNICOS.map(monto => (
-          <optgroup key={monto} label={`── $ ${(monto/1000).toLocaleString("es-CO")}.000 ──`}>
-            {modsDeMontos(monto).map(m =>
-              <option key={m.id} value={m.id}>{m.label}</option>
-            )}
-          </optgroup>
-        ))}
-      </select>
+      {modo==="libre" ? (
+        <>
+          {/* Monto libre */}
+          <div style={{ marginBottom:10 }}>
+            <div style={{ fontSize:12, fontWeight:600, color:"#374151", marginBottom:4 }}>Monto del préstamo</div>
+            <input
+              type="number"
+              placeholder="Ej: 1750000"
+              value={montoInput}
+              onChange={e => setMontoInput(e.target.value)}
+              style={{ width:"100%", padding:"11px 12px", borderRadius:9, border:"2px solid #fbbf24",
+                fontSize:15, fontWeight:700, outline:"none", boxSizing:"border-box" }}
+            />
+            {montoNum>0 && <div style={{fontSize:11,color:"#b45309",marginTop:3}}>
+              = {fmt(montoNum)}
+            </div>}
+          </div>
 
-      {/* Resultado */}
-      {mod ? (
-        <div style={{ marginTop: 12 }}>
-          {/* Cuota destacada */}
-          <div style={{
-            background: "#1d4ed8", borderRadius: 10,
-            padding: "12px 16px", display: "flex",
-            justifyContent: "space-between", alignItems: "center",
-            marginBottom: 10
-          }}>
-            <div>
-              <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: 600, marginBottom: 2 }}>
-                CUOTA ({mod.tipo === "semanal" ? "SEMANAL" : mod.tipo === "quincenal" ? "QUINCENAL" : "MENSUAL"})
-              </div>
-              <div style={{ color: "#fff", fontWeight: 900, fontSize: 28, letterSpacing: -0.5 }}>{fmt(mod.cuota)}</div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 11 }}>{mod.pagos} pago{mod.pagos !== 1 ? "s" : ""}</div>
-              <div style={{ color: "#93c5fd", fontWeight: 800, fontSize: 14, marginTop: 2 }}>{mod.label}</div>
+          {/* Selector de modalidad */}
+          <div style={{ marginBottom:10 }}>
+            <div style={{ fontSize:12, fontWeight:600, color:"#374151", marginBottom:4 }}>Modalidad</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
+              {COMBOS.filter(c=>{
+                // Mostrar solo combos disponibles para montos grandes
+                if(montoNum>=5000000) return true;
+                if(c.pagos===20||c.pagos===10||c.pagos===5) return false;
+                return true;
+              }).map(c=>{
+                const key=`${c.pagos}-${c.tipo}`;
+                const sel=combo&&combo.pagos===c.pagos&&combo.tipo===c.tipo;
+                return(
+                  <button key={key} onClick={()=>setCombo(c)}
+                    style={{ padding:"8px 4px", borderRadius:8, border:`2px solid ${sel?"#f59e0b":"#e5e7eb"}`,
+                      background:sel?"#fef3c7":"#fff", color:sel?"#92400e":"#374151",
+                      fontWeight:sel?800:500, fontSize:12, cursor:"pointer", textAlign:"center" }}>
+                    {c.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* Detalle */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            {[
-              ["💵 Monto prestado",   fmt(mod.monto),           "#1d4ed8"],
-              ["📊 Total a cobrar",   fmt(mod.cuota * mod.pagos),"#374151"],
-              ["✅ Ganancia total",   fmt(mod.ganancia),         "#16a34a"],
-              ["📈 Ganancia semanal", fmt(mod.semanal),          "#7c3aed"],
-            ].map(([lb, v, cl]) => (
-              <div key={lb} style={{ background: "#fff", borderRadius: 8, padding: "9px 11px", border: "1px solid #fde68a" }}>
-                <div style={{ fontSize: 10, color: "#92400e", marginBottom: 3 }}>{lb}</div>
-                <div style={{ fontWeight: 800, color: cl, fontSize: 13 }}>{v}</div>
+          {/* Resultado interpolado */}
+          {resultado ? (
+            <div style={{ marginTop:4 }}>
+              {!resultado.esExacto && (
+                <div style={{ fontSize:11, color:"#b45309", marginBottom:6, background:"#fff7ed", borderRadius:6, padding:"5px 8px" }}>
+                  📐 Interpolado entre {fmt(resultado.infMonto)} y {fmt(resultado.supMonto)} · redondeado a $5.000
+                </div>
+              )}
+              <div style={{ background:"#1d4ed8", borderRadius:10, padding:"12px 16px",
+                display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <div>
+                  <div style={{ color:"rgba(255,255,255,0.7)", fontSize:11, fontWeight:600, marginBottom:2 }}>
+                    CUOTA ({combo.tipo.toUpperCase()})
+                  </div>
+                  <div style={{ color:"#fff", fontWeight:900, fontSize:28, letterSpacing:-0.5 }}>{fmt(resultado.cuota)}</div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ color:"rgba(255,255,255,0.7)", fontSize:11 }}>{combo.pagos} pagos</div>
+                  <div style={{ color:"#93c5fd", fontWeight:800, fontSize:13, marginTop:2 }}>{fmt(montoNum)}</div>
+                </div>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                {[
+                  ["📊 Total a cobrar", fmt(resultado.cuota * combo.pagos), "#374151"],
+                  ["✅ Ganancia total",  fmt(resultado.ganancia),            "#16a34a"],
+                  ["📈 Gan. semanal",   fmt(resultado.semanal),             "#7c3aed"],
+                  ["💵 Monto prestado", fmt(montoNum),                      "#1d4ed8"],
+                ].map(([lb,v,cl])=>(
+                  <div key={lb} style={{ background:"#fff", borderRadius:8, padding:"9px 11px", border:"1px solid #fde68a" }}>
+                    <div style={{ fontSize:10, color:"#92400e", marginBottom:3 }}>{lb}</div>
+                    <div style={{ fontWeight:800, color:cl, fontSize:13 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : montoNum>=100000 && combo ? (
+            <div style={{ marginTop:8, padding:12, background:"#fee2e2", borderRadius:8, fontSize:13, color:"#dc2626", textAlign:"center" }}>
+              Monto fuera del rango disponible para esta modalidad
+            </div>
+          ) : (
+            <div style={{ marginTop:8, padding:12, background:"#fff", borderRadius:8, border:"1px dashed #fbbf24", textAlign:"center", color:"#b45309", fontSize:13 }}>
+              Ingresá el monto y elegí una modalidad
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Leyenda */}
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
+            {[[".S","Semanal","#2563eb"],[".Q","Quincenal","#7c3aed"],[".M","Mensual","#16a34a"]].map(([sf,lb,cl])=>(
+              <div key={sf} style={{ background:"#fff", border:`1.5px solid ${cl}`, borderRadius:20, padding:"2px 10px", fontSize:11, fontWeight:700, color:cl, display:"flex", gap:4, alignItems:"center" }}>
+                <span style={{ fontFamily:"monospace" }}>{sf}</span>
+                <span style={{ color:"#6b7280", fontWeight:400 }}>= {lb}</span>
               </div>
             ))}
           </div>
-        </div>
-      ) : (
-        <div style={{
-          marginTop: 10, padding: 14, background: "#fff",
-          borderRadius: 8, border: "1px dashed #fbbf24",
-          textAlign: "center", color: "#b45309", fontSize: 13
-        }}>
-          Seleccioná una modalidad para ver la cuota al instante
-        </div>
+          <select value={modId} onChange={e=>setModId(e.target.value)}
+            style={{ width:"100%", padding:"11px 12px", borderRadius:9, border:"2px solid #fbbf24",
+              fontSize:14, outline:"none", background:"#fff", fontWeight:600, color:"#1f2937",
+              boxSizing:"border-box", cursor:"pointer" }}>
+            <option value="">Seleccioná una modalidad...</option>
+            {MONTOS_UNICOS.map(monto=>(
+              <optgroup key={monto} label={`── $ ${(monto/1000).toLocaleString("es-CO")}.000 ──`}>
+                {modsDeMontos(monto).map(m=><option key={m.id} value={m.id}>{m.label}</option>)}
+              </optgroup>
+            ))}
+          </select>
+          {modExacto && (
+            <div style={{ marginTop:12 }}>
+              <div style={{ background:"#1d4ed8", borderRadius:10, padding:"12px 16px",
+                display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <div>
+                  <div style={{ color:"rgba(255,255,255,0.7)", fontSize:11, fontWeight:600, marginBottom:2 }}>
+                    CUOTA ({modExacto.tipo==="semanal"?"SEMANAL":modExacto.tipo==="quincenal"?"QUINCENAL":"MENSUAL"})
+                  </div>
+                  <div style={{ color:"#fff", fontWeight:900, fontSize:28, letterSpacing:-0.5 }}>{fmt(modExacto.cuota)}</div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ color:"rgba(255,255,255,0.7)", fontSize:11 }}>{modExacto.pagos} pagos</div>
+                  <div style={{ color:"#93c5fd", fontWeight:800, fontSize:14, marginTop:2 }}>{modExacto.label}</div>
+                </div>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                {[
+                  ["💵 Monto",          fmt(modExacto.monto),              "#1d4ed8"],
+                  ["📊 Total a cobrar", fmt(modExacto.cuota*modExacto.pagos),"#374151"],
+                  ["✅ Ganancia total", fmt(modExacto.ganancia),            "#16a34a"],
+                  ["📈 Gan. semanal",   fmt(modExacto.semanal),            "#7c3aed"],
+                ].map(([lb,v,cl])=>(
+                  <div key={lb} style={{ background:"#fff", borderRadius:8, padding:"9px 11px", border:"1px solid #fde68a" }}>
+                    <div style={{ fontSize:10, color:"#92400e", marginBottom:3 }}>{lb}</div>
+                    <div style={{ fontWeight:800, color:cl, fontSize:13 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {!modExacto && (
+            <div style={{ marginTop:10, padding:14, background:"#fff", borderRadius:8,
+              border:"1px dashed #fbbf24", textAlign:"center", color:"#b45309", fontSize:13 }}>
+              Seleccioná una modalidad para ver la cuota
+            </div>
+          )}
+        </>
       )}
     </div>
   );
