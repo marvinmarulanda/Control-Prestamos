@@ -426,8 +426,7 @@ function App(){
   };
   const addLoan=()=>{
     if(!fLoan.clientId)return;
-    if(activeLoans.length>=30){toast2("Límite de 30 préstamos alcanzado");return;}
-    if(activeLoans.length>=30)return;
+
     let monto,cuota,pagos,tipo,ganancia,semanal;
     if(fLoan.esManual){
       monto=Number(fLoan.manualMonto);cuota=Number(fLoan.manualCuota);
@@ -453,18 +452,19 @@ function App(){
   };
   const deleteLoan=(id)=>{
     const loan=loans.find(l=>l.id===id);
-    setConfirm({msg:"¿Eliminar este préstamo?",onOk:()=>{
-      if(loan){
-        // Reversar el efecto neto sobre caja:
-        // Se restó el monto cuando se creó, se sumó cada cuota pagada.
-        // Net = -monto + (pagas * cuota). Para revertir: +monto - (pagas * cuota)
+    const esCompleto = loan && loan.installments.every(i=>i.paid);
+    setConfirm({msg:esCompleto?"¿Eliminar este préstamo completado? (no afecta la caja ni las ganancias)":"¿Eliminar este préstamo activo? Se reversa el efecto en caja.",onOk:()=>{
+      if(loan && !esCompleto){
+        // Solo reversar caja si el préstamo NO estaba completado
+        // (si estaba completo, toda la plata ya entró cuota a cuota correctamente)
         const pagas = loan.installments.filter(i=>i.paid).length;
         const devolver = loan.monto - pagas * loan.cuota;
-        setCaja(prev => prev + devolver);
+        if(devolver !== 0) setCaja(prev => prev + devolver);
       }
+      // La gananciaApp NO se toca al borrar un completado — ya fue grabada al pagar la última cuota
       setLoans(p=>p.filter(l=>l.id!==id));
       if(detail?.id===id)setDetail(null);
-      toast2("Préstamo eliminado · caja ajustada");
+      toast2(esCompleto?"Historial eliminado ✓":"Préstamo eliminado · caja ajustada");
     }});
   };
   // helpers billetera
@@ -790,9 +790,8 @@ function App(){
           <div style={{padding:"12px 14px"}}>
             <div style={{...S.card,background:"#eff6ff",border:"1px solid #bfdbfe"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div style={{fontWeight:700,fontSize:15}}>👥 Clientes <span style={{color:"#2563eb"}}>{clients.length}/30</span></div>
+                <div style={{fontWeight:700,fontSize:15}}>👥 Clientes <span style={{color:"#2563eb"}}>{clients.length}</span></div>
               </div>
-              <div style={{height:6,background:"#dbeafe",borderRadius:3,marginTop:8}}><div style={{height:"100%",background:"#2563eb",borderRadius:3,width:`${clients.length/30*100}%`}}></div></div>
             </div>
             <div style={{display:"flex",gap:8,marginBottom:10}}>
               <input style={{...S.inp,flex:1}} placeholder="Buscar clientes..." value={search} onChange={e=>setSearch(e.target.value)}/>
@@ -827,18 +826,25 @@ function App(){
         {tab==="loans"&&(
           <div style={{padding:"12px 14px"}}>
             <div style={{...S.card,background:"#eff6ff",border:"1px solid #bfdbfe"}}>
-              <div style={{fontWeight:700,fontSize:15}}>💰 Préstamos <span style={{color:"#2563eb"}}>{activeLoans.length+completedLoans.length}/30</span></div>
-              <div style={{height:6,background:"#dbeafe",borderRadius:3,marginTop:8}}><div style={{height:"100%",background:"#2563eb",borderRadius:3,width:`${Math.min((activeLoans.length+completedLoans.length)/30,1)*100}%`}}></div></div>
+              <div style={{fontWeight:700,fontSize:15}}>💰 Préstamos · <span style={{color:"#2563eb"}}>{activeLoans.length} activos</span> · <span style={{color:"#6b7280"}}>{completedLoans.length} completados</span></div>
             </div>
             <div style={{display:"flex",gap:8,marginBottom:10}}>
               <input style={{...S.inp,flex:1}} placeholder="Buscar por cliente..." value={search} onChange={e=>setSearch(e.target.value)}/>
               <button onClick={()=>{setFLoan({clientId:"",modId:"",startDate:todayStr(),firstPayDate:"",nota:"",esManual:false,manualMonto:"",manualCuota:"",manualPagos:"",manualTipo:"quincenal"});setModal("new-loan");}} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:8,padding:"0 14px",fontWeight:700,cursor:"pointer",fontSize:13,whiteSpace:"nowrap"}}>+ Nuevo</button>
             </div>
             <div style={{display:"flex",gap:8,marginBottom:10}}>
-              {[["Activos",false],[`Completados`,true]].map(([lb,v])=>(
-                <button key={lb} onClick={()=>setShowCompleted(v)} style={{flex:1,padding:"8px",borderRadius:20,border:"none",fontWeight:700,fontSize:13,cursor:"pointer",background:showCompleted===v?"#2563eb":"#e5e7eb",color:showCompleted===v?"#fff":"#374151"}}>{lb} ({v?completedLoans.length:activeLoans.length})</button>
-              ))}
+              <button onClick={()=>setShowCompleted(false)} style={{flex:1,padding:"8px",borderRadius:20,border:"none",fontWeight:700,fontSize:13,cursor:"pointer",background:!showCompleted?"#2563eb":"#e5e7eb",color:!showCompleted?"#fff":"#374151"}}>
+                Activos ({activeLoans.length})
+              </button>
+              <button onClick={()=>setShowCompleted(true)} style={{flex:1,padding:"8px",borderRadius:20,border:"none",fontWeight:700,fontSize:13,cursor:"pointer",background:showCompleted?"#7c3aed":"#e5e7eb",color:showCompleted?"#fff":"#374151"}}>
+                📂 Historial ({completedLoans.length})
+              </button>
             </div>
+            {showCompleted&&(
+              <div style={{background:"#f5f3ff",border:"1px solid #ddd6fe",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,color:"#7c3aed"}}>
+                📂 Estos préstamos son solo informativos. Eliminarlos <b>no afecta</b> la caja ni las ganancias.
+              </div>
+            )}
             {(showCompleted?completedLoans:activeLoans).filter(l=>{const c=clients.find(cl=>cl.id===l.clientId);return(c?.name||"").toLowerCase().includes(search.toLowerCase());}).map(l=>(
               <LoanCard key={l.id} loan={l} clientName={clients.find(c=>c.id===l.clientId)?.name} onSelect={()=>setDetail({type:"loan",id:l.id})} onDelete={()=>deleteLoan(l.id)}/>
             ))}
@@ -857,6 +863,28 @@ function App(){
                   <span style={{fontWeight:800,color:cl}}>{fmt(v)}</span>
                 </div>
               ))}
+            </div>
+
+            {/* ── Historial completados ── */}
+            {completedLoans.length>0&&(
+              <div style={S.card}>
+                <h3 style={{margin:"0 0 10px",fontSize:15,fontWeight:700}}>📂 Historial Completados</h3>
+                <div style={{background:"#f5f3ff",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,color:"#7c3aed"}}>
+                  Solo informativo · no afecta ningún balance ni la caja
+                </div>
+                {[
+                  ["Préstamos completados", completedLoans.length+" préstamos", "#7c3aed"],
+                  ["Capital prestado histórico", fmt(completedLoans.reduce((s,l)=>s+l.monto,0)), "#374151"],
+                  ["Total cobrado histórico", fmt(completedLoans.reduce((s,l)=>s+l.cuota*l.pagos,0)), "#16a34a"],
+                  ["Ganancia generada histórica", fmt(completedLoans.reduce((s,l)=>s+l.ganancia,0)), "#16a34a"],
+                ].map(([lb,v,cl])=>(
+                  <div key={lb} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid #f3f4f6"}}>
+                    <span style={{fontSize:13,color:"#6b7280"}}>{lb}</span>
+                    <span style={{fontWeight:800,color:cl,fontSize:13}}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             </div>
 
             <div style={S.card}>
