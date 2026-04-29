@@ -321,7 +321,16 @@ function App(){
     load().then(d=>{
       if(d){
         setClients(d.clients||[]);
-        setLoans(d.loans||[]);
+        // ── Migración: recalcular semanal correcto en todos los préstamos ──
+        const loansFixed=(d.loans||[]).map(l=>{
+          const s=l.tipo==="semanal"
+            ?Math.round(l.ganancia/l.pagos)
+            :l.tipo==="quincenal"
+            ?Math.round(l.ganancia/(l.pagos*2))
+            :Math.round(l.ganancia/(l.pagos*4));
+          return {...l,semanal:s};
+        });
+        setLoans(loansFixed);
         setCaja(d.caja??2884000);
         setMovCaja(d.movCaja??[]);
         setLastBackup(d.lastBackup??null);
